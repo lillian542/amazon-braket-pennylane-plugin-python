@@ -65,7 +65,7 @@ class QuEraAquila(QubitDevice):
         ahs_program = self.create_ahs_program(ev_op)
 
         if self.simulator:
-            task = self._device.run(ahs_program, shots=self.shots, steps=100).result()
+            task = self._device.run(ahs_program, shots=self.shots, steps=100)
 
         else:
             discretized_ahs_program = ahs_program.discretize(self._device)
