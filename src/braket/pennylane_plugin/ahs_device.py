@@ -106,7 +106,7 @@ class QuEraAquila(QubitDevice):
         return ahs_program
 
     def generate_samples(self):
-        return [self._res_to_sample_output(res) for res in self.samples.measurements]
+        return [self._result_to_sample_output(res) for res in self.samples.measurements]
 
     def _validate_operations(self, operations):
 
