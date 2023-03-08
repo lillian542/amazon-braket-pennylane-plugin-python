@@ -1,4 +1,5 @@
 from functools import partial
+import numpy as np
 
 from braket.aws import AwsDevice
 from braket.devices import LocalSimulator
@@ -182,6 +183,7 @@ class QuEraAquila(QubitDevice):
         start = interval_ns[0]
         end = interval_ns[1]
 
+
         # we want an integer number of nanoseconds
         times = np.linspace(start, end, num_points, dtype=int)  # we want an integer number of nanoseconds
 
@@ -189,13 +191,13 @@ class QuEraAquila(QubitDevice):
         return times / 1e9
 
     # could be static?
-    def _convert_to_time_series(self, coeff, time_points):
+    def _convert_to_time_series(self, coeff, time_points, scaling_factor=1):
 
         ts = TimeSeries()
 
         if callable(coeff):
             # time is now in ns, but fn is defined assuming time in us? maybe we should commit to ns
-            vals = [float(coeff(t * 1e6)) for t in time_points]
+            vals = [float(coeff(t * 1e6))*scaling_factor for t in time_points]
         else:
             vals = [coeff for t in time_points]
 
@@ -211,8 +213,8 @@ class QuEraAquila(QubitDevice):
 
         # do we need to do any unit conversions between MHz and rad/s?
         # we tell users in the docstring to specify in MHz, but where do we assume MHz mathematically in simulation?
-        amplitude = self._convert_to_time_series(pulse.rabi, time_points)
-        detuning = self._convert_to_time_series(pulse.detuning, time_points)
+        amplitude = self._convert_to_time_series(pulse.rabi, time_points, scaling_factor=2*np.pi)
+        detuning = self._convert_to_time_series(pulse.detuning, time_points, scaling_factor=2*np)
         phase = self._convert_to_time_series(pulse.phase, time_points)
 
         drive = DrivingField(amplitude=amplitude, detuning=detuning, phase=phase)
