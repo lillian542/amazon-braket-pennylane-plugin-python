@@ -172,8 +172,7 @@ class QuEraAquila(QubitDevice):
 
     # could be static
     def _get_sample_times(self, time_interval):
-        # assuming users in PL set time in us, we convert to ns
-        # maybe they should just use ns? We will need to decide on a convention.
+        # time_interval from PL is in microseconds
         interval_ns = np.array(time_interval) * 1e3
         timespan = interval_ns[1] - interval_ns[0]
 
@@ -183,9 +182,8 @@ class QuEraAquila(QubitDevice):
         start = interval_ns[0]
         end = interval_ns[1]
 
-
         # we want an integer number of nanoseconds
-        times = np.linspace(start, end, num_points, dtype=int)  # we want an integer number of nanoseconds
+        times = np.linspace(start, end, num_points, dtype=int)
 
         # we return time in seconds
         return times / 1e9
@@ -211,10 +209,9 @@ class QuEraAquila(QubitDevice):
 
         time_points = self._get_sample_times(time_interval)
 
-        # do we need to do any unit conversions between MHz and rad/s?
-        # we tell users in the docstring to specify in MHz, but where do we assume MHz mathematically in simulation?
-        amplitude = self._convert_to_time_series(pulse.amplitude, time_points, scaling_factor=2*np.pi)
-        detuning = self._convert_to_time_series(pulse.detuning, time_points, scaling_factor=2*np)
+        # scaling factor for amplitude and detunig convert MHz (expected PL input) to rad/s (upload units)
+        amplitude = self._convert_to_time_series(pulse.amplitude, time_points, scaling_factor=2*np.pi*1e6)
+        detuning = self._convert_to_time_series(pulse.detuning, time_points, scaling_factor=2*np.pi*1e6)
         phase = self._convert_to_time_series(pulse.phase, time_points)
 
         drive = DrivingField(amplitude=amplitude, detuning=detuning, phase=phase)
