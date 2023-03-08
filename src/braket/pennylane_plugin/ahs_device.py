@@ -156,8 +156,8 @@ class QuEraAquila(QubitDevice):
         for pulse in pulses:
             # is this a dangerous choice? (I think so.) Can these orders be easily mixed up?
             # yes but same problem with coeffs, params? think about this after resolving phase-as-a-callable
-            if callable(pulse.rabi):
-                pulse.rabi = evaluated_coeffs[idx]
+            if callable(pulse.amplitude):
+                pulse.amplitude = evaluated_coeffs[idx]
                 idx += 1
 
             if callable(pulse.detuning):
@@ -213,7 +213,7 @@ class QuEraAquila(QubitDevice):
 
         # do we need to do any unit conversions between MHz and rad/s?
         # we tell users in the docstring to specify in MHz, but where do we assume MHz mathematically in simulation?
-        amplitude = self._convert_to_time_series(pulse.rabi, time_points, scaling_factor=2*np.pi)
+        amplitude = self._convert_to_time_series(pulse.amplitude, time_points, scaling_factor=2*np.pi)
         detuning = self._convert_to_time_series(pulse.detuning, time_points, scaling_factor=2*np)
         phase = self._convert_to_time_series(pulse.phase, time_points)
 
