@@ -10,11 +10,20 @@ from braket.timings.time_series import TimeSeries
 
 from pennylane import QubitDevice
 from pennylane._version import __version__
-from pennylane.pulse import RydbergHamiltonian
+from pennylane.pulse import RydbergHamiltonian, RydbergPulse
 
 
 class QuEraAquila(QubitDevice):
-    """Amazon Braket AwsDevice interface for analogue hamiltonian simulation on QuEra Aquila for PennyLane."""
+    """Amazon Braket AwsDevice interface for analogue hamiltonian simulation on the QuEra Aquila hardware for PennyLane.
+
+    Args:
+        wires (int or Iterable[Number, str]]): Number of subsystems represented by the device,
+            or iterable that contains unique labels for the subsystems as numbers
+            (i.e., ``[-1, 0, 2]``) or strings (``['ancilla', 'q1', 'q2']``).
+        shots (int): Number of executions to run to aquire measurements. Defaults to 100.
+        simulator (bool): if True, the device connects to a local simulator rather than remote hardware
+            upon initialization. Defaults to True.
+    """
 
     name = "Braket QuEra Aquila PennyLane plugin"
     short_name = "quera.aquila"
@@ -55,9 +64,11 @@ class QuEraAquila(QubitDevice):
 
     @property
     def hardware_capabilities(self):
+        """Dictionary of hardware capabilities for the Aquila device"""
         return self._device.properties.paradigm.dict()
 
     def apply(self, operations, **kwargs):
+        """Convert the pulse operation to an AHS program and run on the connected device"""
 
         self._validate_operations(operations)
 
@@ -75,30 +86,22 @@ class QuEraAquila(QubitDevice):
         self.samples = task.result()
 
     def create_ahs_program(self, evolution):
-        """Create AHS program for upload to hardware from a ParametrizedEvolution"""
+        """Create AHS program for upload to hardware from a ParametrizedEvolution
+
+        Returns:
+            AnalogHamiltonianSimulation: a program containing the register and drive
+                information for running an AHS task on simulation or hardware"""
 
         params = evolution.parameters
 
         # sets self.pulses to be the evaluated pulses (now only a function of time)
         self._evaluate_pulses(evolution, params)
-        # creates AtomArrangement object from H.register
         self._create_register(evolution.H.register)
 
-        # if multiple operators were allowed, there would be multiple time intervals here.
-        # need to think about constraints in terms of how/whether these can overlap, as well as
         time_interval = evolution.t
 
         # no gurarentee that global drive is index 0 once we start allowing more just global drive
         drive = self._convert_pulse_to_driving_field(self.pulses[0], time_interval)
-
-        # currently not being tested, but this will not be the correct way to handle this
-        # I don't think multiple global drives should be an option in the same time_interval
-        # and if additional drives aren't global drives, they will need to be implemented differently
-        # (i.e. check only detuning is defined and use braket.ahs.ShiftingField instead of DrivingField)
-        # if we wait to implement local control until outside PL until it's available on HW, this is not needed yet
-        if len(self.pulses) > 1:
-            for pulse in self.pulses[1:]:
-                drive += self._convert_pulse_to_driving_field(pulse, time_interval)
 
         ahs_program = AnalogHamiltonianSimulation(register=self.register, hamiltonian=drive)
 
@@ -107,9 +110,16 @@ class QuEraAquila(QubitDevice):
         return ahs_program
 
     def generate_samples(self):
+        r"""Returns the computational basis samples measured for all wires.
+
+        Returns:
+             array[complex]: array of samples in the shape ``(dev.shots, dev.num_wires)``
+        """
         return [self._result_to_sample_output(res) for res in self.samples.measurements]
 
     def _validate_operations(self, operations):
+        """Confirms that the list of operations provided contains a single ParametrizedEvolution
+        from a RydbergHamiltonian with only a single, global pulse"""
 
         if len(operations) > 1:
             raise NotImplementedError(
@@ -128,7 +138,6 @@ class QuEraAquila(QubitDevice):
                 f"Support for multiple pulses in a Rydberg Hamiltonian not currently supported on "
                 f"hardware or in simulation")
             #  ToDo: add local drive (detuning only, uses different mechanism)
-            #  Could be skipped for now as it's an upcoming feature on hardware, currently only supported in simulation)
 
         if ev_op.H.pulses[0].wires != self.wires:
             raise NotImplementedError(
@@ -137,13 +146,21 @@ class QuEraAquila(QubitDevice):
 
     # could be static method or just completely separate from the class
     def _create_register(self, coordinates):
+        """Create an AtomArrangement to describe the atom layout from the coordinates in the ParametrizedEvolution"""
         register = AtomArrangement()
         for [x, y] in coordinates:
-            register.add([x * 1e-6, y * 1e-6])  # we ask users to specify in um, braket expects SI units
+            register.add([x * 1e-6, y * 1e-6])  # PL asks users to specify in um, Braket expects SI units
 
         self.register = register
 
     def _evaluate_pulses(self, ev_op, params):
+        """Feeds in the parameters in order to partially evaluate the callables (amplitude, phase and/or detuning)
+        describing the pulses, so they are only a function of time
+
+        Args:
+            ev_op(ParametrizedEvolution): the operator containing the pulses to be evaluated
+            params(list): a list of the parameters to be passed to the respective callables
+        """
 
         # ToDo: what happens if H.pulses is an empty list? I.e. if only interaction term
         pulses = ev_op.H.pulses
@@ -154,8 +171,6 @@ class QuEraAquila(QubitDevice):
         idx = 0
 
         for pulse in pulses:
-            # is this a dangerous choice? (I think so.) Can these orders be easily mixed up?
-            # yes but same problem with coeffs, params? think about this after resolving phase-as-a-callable
             if callable(pulse.amplitude):
                 pulse.amplitude = evaluated_coeffs[idx]
                 idx += 1
@@ -170,8 +185,10 @@ class QuEraAquila(QubitDevice):
 
         self.pulses = pulses
 
+    # ToDo: should the 50ns number instead be retrieved from the HW dict (when connected to HW)?
     # could be static
     def _get_sample_times(self, time_interval):
+        """Takes a time interval and returns an array of times with a minimum of 50ns spacing"""
         # time_interval from PL is in microseconds
         interval_ns = np.array(time_interval) * 1e3
         timespan = interval_ns[1] - interval_ns[0]
@@ -189,15 +206,28 @@ class QuEraAquila(QubitDevice):
         return times / 1e9
 
     # could be static?
-    def _convert_to_time_series(self, coeff, time_points, scaling_factor=1):
+    def _convert_to_time_series(self, pulse_parameter, time_points, scaling_factor=1):
+        """Converts pulse information into a TimeSeries
+
+        Args:
+            pulse_parameter(Union[float, Callable]): a physical parameter (pulse, amplitude or detuning) of the
+                pulse. If this is a callalbe, it has alreayd been partially evaluated, such that it is only a
+                function of time.
+            time_points(array): the times where parameters will be set in the TimeSeries, specified in seconds
+            scaling_factor(float): A multiplication factor for the pulse_parameter where relevant to convert
+                between units. Defaults to 1.
+
+        Returns:
+            TimeSeries: a description of setpoints and corresponding times
+        """
 
         ts = TimeSeries()
 
-        if callable(coeff):
-            # time is now in ns, but fn is defined assuming time in us? maybe we should commit to ns
-            vals = [float(coeff(t * 1e6))*scaling_factor for t in time_points]
+        if callable(pulse_parameter):
+            # convert time to microseconds to evaluate values - this is the expected unit for the PL functions
+            vals = [float(pulse_parameter(t * 1e6))*scaling_factor for t in time_points]
         else:
-            vals = [coeff for t in time_points]
+            vals = [pulse_parameter for t in time_points]
 
         for t, v in zip(time_points, vals):
             ts.put(t, v)
@@ -206,6 +236,16 @@ class QuEraAquila(QubitDevice):
 
     # could be static?
     def _convert_pulse_to_driving_field(self, pulse, time_interval):
+        """Converts a ``RydbergPulse`` from PennyLane describing a global drive to a ``DrivingField``
+        from Braket AHS
+
+        Args:
+            pulse[RydbergPulse]: a dataclass object containing amplitude, phase and detuning information
+            time_interval(array[Number, Number]]): The start and end time for the applied pulse
+
+        Returns:
+            DrivingField: the object representing the global drive for the AnalogueHamiltonianSimulation object
+        """
 
         time_points = self._get_sample_times(time_interval)
 
