@@ -10,62 +10,38 @@ from braket.timings.time_series import TimeSeries
 
 from pennylane import QubitDevice
 from pennylane._version import __version__
-from pennylane.pulse import RydbergHamiltonian, RydbergPulse
+from pennylane.pulse.rydberg_hamiltonian import RydbergHamiltonian, RydbergPulse
 
 
-class QuEraAquila(QubitDevice):
-    """Amazon Braket AwsDevice interface for analogue hamiltonian simulation on the QuEra Aquila hardware for PennyLane.
+class BraketAhsDevice(QubitDevice):
+    """Abstract Amazon Braket device for analogue hamiltonian simulation with PennyLane.
 
     Args:
         wires (int or Iterable[Number, str]]): Number of subsystems represented by the device,
             or iterable that contains unique labels for the subsystems as numbers
             (i.e., ``[-1, 0, 2]``) or strings (``['ancilla', 'q1', 'q2']``).
         shots (int): Number of executions to run to aquire measurements. Defaults to 100.
-        simulator (bool): if True, the device connects to a local simulator rather than remote hardware
-            upon initialization. Defaults to True.
     """
 
-    name = "Braket QuEra Aquila PennyLane plugin"
-    short_name = "quera.aquila"
+    name = "Braket AHS PennyLane plugin"
     pennylane_requires = ">=0.29.0"
     version = __version__
     author = "Xanadu Inc."
 
     operations = {"ParametrizedEvolution"}
 
-    ARN_NR = "arn:aws:braket:us-east-1::device/qpu/quera/Aquila"
-
     def __init__(
             self,
             wires,
+            device,
             *,
-            shots=100,
-            simulator=True):
+            shots=100):
 
-        self.shots = shots
-        self.simulator = simulator
-
+        self._device = device
         super().__init__(wires=wires, shots=shots)
 
-        if simulator:  # this should be a separate thing long-term, this is just for ease of development and testing
-            self._device = LocalSimulator("braket_ahs")
-        else:
-            self._device = AwsDevice(self.ARN_NR)
-
-        self.circuit = []
         self.ahs_program = None
         self.samples = None
-
-    def reset(self):
-        """Reset the device and reload configurations."""
-        self.circuit = []
-        self.ahs_program = None
-        self.samples = None
-
-    @property
-    def hardware_capabilities(self):
-        """Dictionary of hardware capabilities for the Aquila device"""
-        return self._device.properties.paradigm.dict()
 
     def apply(self, operations, **kwargs):
         """Convert the pulse operation to an AHS program and run on the connected device"""
@@ -76,14 +52,12 @@ class QuEraAquila(QubitDevice):
 
         ahs_program = self.create_ahs_program(ev_op)
 
-        if self.simulator:
-            task = self._device.run(ahs_program, shots=self.shots, steps=100)
-
-        else:
-            discretized_ahs_program = ahs_program.discretize(self._device)
-            task = self._device.run(discretized_ahs_program, shots=self.shots)
+        task = self._run_task(ahs_program)
 
         self.samples = task.result()
+
+    def _run_task(self, ahs_program):
+        raise NotImplementedError("Running a task not implemented for the base class")
 
     def create_ahs_program(self, evolution):
         """Create AHS program for upload to hardware from a ParametrizedEvolution
@@ -133,16 +107,10 @@ class QuEraAquila(QubitDevice):
                 f"Expected a RydbergHamiltonian instance for interfacing with the device, but "
                 f"recieved {type(ev_op.H)}.")
 
-        if len(ev_op.H.pulses) > 1:
-            raise NotImplementedError(
-                f"Support for multiple pulses in a Rydberg Hamiltonian not currently supported on "
-                f"hardware or in simulation")
-            #  ToDo: add local drive (detuning only, uses different mechanism)
+        self._validate_pulses(ev_op.H.pulses)
 
-        if ev_op.H.pulses[0].wires != self.wires:
-            raise NotImplementedError(
-                f"Only global drive is currently supported. Found drive defined for subset "
-                f"{[ev_op.H.pulses[0].wires]} of all wires [{self.wires}]")
+    def _validate_pulses(self, pulses):
+        raise NotImplementedError("Validation of pulses not implemented in the base class")
 
     # could be static method or just completely separate from the class
     def _create_register(self, coordinates):
@@ -266,7 +234,7 @@ class QuEraAquila(QubitDevice):
         The QuEra results are summarized via 3 values: status, pre_sequence, and post_sequence.
 
         Status is success or fail. The pre_sequence is 1 if an atom in the ground state was successfully
-        initialized, and 0 otherwise. The post_sequence is 1 if an atom in the ground state was measured, \
+        initialized, and 0 otherwise. The post_sequence is 1 if an atom in the ground state was measured,
         and 0 otherwise. Comparison of pre_sequence and post_sequence reveals one of 3 possible outcomes:
 
         0 --> 0: Atom failed to be placed, no measurement (no atom in the ground state either before or after)
@@ -282,3 +250,94 @@ class QuEraAquila(QubitDevice):
 
         # set entry to 0 if ground state is measured, 1 if excited state is measured, NaN if measurement failed
         return np.array(pre_sequence - res.post_sequence)
+
+
+class BraketAquilaDevice(BraketAhsDevice):
+    """Amazon Braket AHS device for QuEra Aquila hardware for PennyLane.
+
+    Args:
+        wires (int or Iterable[Number, str]]): Number of subsystems represented by the device,
+            or iterable that contains unique labels for the subsystems as numbers
+            (i.e., ``[-1, 0, 2]``) or strings (``['ancilla', 'q1', 'q2']``).
+        shots (int): Number of executions to run to aquire measurements. Defaults to 100.
+    """
+
+    name = "Braket QuEra Aquila PennyLane plugin"
+    short_name = "braket.aws.aquila"
+
+    ARN_NR = "arn:aws:braket:us-east-1::device/qpu/quera/Aquila"
+
+    def __init__(
+            self,
+            wires,
+            *,
+            shots=100):
+
+        dev = AwsDevice(self.ARN_NR)
+        super().__init__(wires=wires, device=dev, shots=shots)
+
+        self.ahs_program = None
+        self.samples = None
+
+    @property
+    def hardware_capabilities(self):
+        """Dictionary of hardware capabilities for the Aquila device"""
+        return self._device.properties.paradigm.dict()
+
+    def _run_task(self, ahs_program):
+        discretized_ahs_program = ahs_program.discretize(self._device)
+        task = self._device.run(discretized_ahs_program, shots=self.shots)
+
+    def _validate_pulses(self, pulses):
+
+        if len(pulses) > 1:
+            raise NotImplementedError(
+                f"Multiple pulses in a Rydberg Hamiltonian are not currently supported on "
+                f"hardware. Recieved {len(pulses)} pulses.")
+
+        if pulses[0].wires != self.wires:
+            raise NotImplementedError(
+                f"Only global drive is currently supported on hardware. Found drive defined for subset "
+                f"{[pulses[0].wires]} of all wires [{self.wires}]")
+
+
+class BraketLocalAquilaDevice(BraketAhsDevice):
+    """Amazon Braket LocalSimulator AHS device for PennyLane.
+
+    Args:
+        wires (int or Iterable[Number, str]]): Number of subsystems represented by the device,
+            or iterable that contains unique labels for the subsystems as numbers
+            (i.e., ``[-1, 0, 2]``) or strings (``['ancilla', 'q1', 'q2']``).
+        shots (int): Number of executions to run to aquire measurements. Defaults to 100.
+    """
+
+    name = "Braket QuEra Aquila PennyLane plugin"
+    short_name = "braket.local.aquila"
+
+    def __init__(
+            self,
+            wires,
+            *,
+            shots=100):
+
+        dev = LocalSimulator("braket_ahs")
+        print(shots)
+        super().__init__(wires=wires, device=dev, shots=shots)
+
+    def _run_task(self, ahs_program):
+        task = self._device.run(self.ahs_program, shots=self.shots, steps=100)
+        return task
+
+    def _validate_pulses(self, pulses):
+
+        # ToDo: allow local drive
+
+        if len(pulses) > 1:
+            raise NotImplementedError(
+                f"Multiple pulses in a Rydberg Hamiltonian are not currently supported on "
+                f"hardware. Recieved {len(pulses)} pulses.")
+
+        if pulses[0].wires != self.wires:
+            raise NotImplementedError(
+                f"Only global drive is currently supported on hardware. Found drive defined for subset "
+                f"{[pulses[0].wires]} of all wires [{self.wires}]")
