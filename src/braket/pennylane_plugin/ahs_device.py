@@ -30,13 +30,7 @@ class BraketAhsDevice(QubitDevice):
 
     operations = {"ParametrizedEvolution"}
 
-    def __init__(
-            self,
-            wires,
-            device,
-            *,
-            shots=100):
-
+    def __init__(self, wires, device, *, shots=100):
         self._device = device
         super().__init__(wires=wires, shots=shots)
 
@@ -98,14 +92,16 @@ class BraketAhsDevice(QubitDevice):
         if len(operations) > 1:
             raise NotImplementedError(
                 f"Support for multiple ParametrizedEvolution operators in a single circuit is "
-                f"not yet implemented. Recieved {len(operations)} operators.")
+                f"not yet implemented. Recieved {len(operations)} operators."
+            )
 
         ev_op = operations[0]  # only one!
 
         if not isinstance(ev_op.H, RydbergHamiltonian):
             raise RuntimeError(
                 f"Expected a RydbergHamiltonian instance for interfacing with the device, but "
-                f"recieved {type(ev_op.H)}.")
+                f"recieved {type(ev_op.H)}."
+            )
 
         self._validate_pulses(ev_op.H.pulses)
 
@@ -117,7 +113,9 @@ class BraketAhsDevice(QubitDevice):
         """Create an AtomArrangement to describe the atom layout from the coordinates in the ParametrizedEvolution"""
         register = AtomArrangement()
         for [x, y] in coordinates:
-            register.add([x * 1e-6, y * 1e-6])  # PL asks users to specify in um, Braket expects SI units
+            register.add(
+                [x * 1e-6, y * 1e-6]
+            )  # PL asks users to specify in um, Braket expects SI units
 
         self.register = register
 
@@ -193,7 +191,7 @@ class BraketAhsDevice(QubitDevice):
 
         if callable(pulse_parameter):
             # convert time to microseconds to evaluate values - this is the expected unit for the PL functions
-            vals = [float(pulse_parameter(t * 1e6))*scaling_factor for t in time_points]
+            vals = [float(pulse_parameter(t * 1e6)) * scaling_factor for t in time_points]
         else:
             vals = [pulse_parameter for t in time_points]
 
@@ -218,8 +216,12 @@ class BraketAhsDevice(QubitDevice):
         time_points = self._get_sample_times(time_interval)
 
         # scaling factor for amplitude and detunig convert MHz (expected PL input) to rad/s (upload units)
-        amplitude = self._convert_to_time_series(pulse.amplitude, time_points, scaling_factor=2*np.pi*1e6)
-        detuning = self._convert_to_time_series(pulse.detuning, time_points, scaling_factor=2*np.pi*1e6)
+        amplitude = self._convert_to_time_series(
+            pulse.amplitude, time_points, scaling_factor=2 * np.pi * 1e6
+        )
+        detuning = self._convert_to_time_series(
+            pulse.detuning, time_points, scaling_factor=2 * np.pi * 1e6
+        )
         phase = self._convert_to_time_series(pulse.phase, time_points)
 
         drive = DrivingField(amplitude=amplitude, detuning=detuning, phase=phase)
@@ -239,10 +241,11 @@ class BraketAhsDevice(QubitDevice):
 
         0 --> 0: Atom failed to be placed, no measurement (no atom in the ground state either before or after)
         1 --> 0: Atom initialized, measured in Rydberg state (atom in ground state detected before, but not after)
-        1 --> 1: Atom initialized, measured in ground state (atom in ground state detected both before and after)"""
+        1 --> 1: Atom initialized, measured in ground state (atom in ground state detected both before and after)
+        """
 
         # if entire measurement failed, all NaN
-        if not res.status.value.lower() == 'success':
+        if not res.status.value.lower() == "success":
             return [np.NaN, np.NaN, np.NaN]
 
         # if a single atom failed to initialize, NaN for that individual measurement
@@ -267,12 +270,7 @@ class BraketAquilaDevice(BraketAhsDevice):
 
     ARN_NR = "arn:aws:braket:us-east-1::device/qpu/quera/Aquila"
 
-    def __init__(
-            self,
-            wires,
-            *,
-            shots=100):
-
+    def __init__(self, wires, *, shots=100):
         dev = AwsDevice(self.ARN_NR)
         super().__init__(wires=wires, device=dev, shots=shots)
 
@@ -289,16 +287,17 @@ class BraketAquilaDevice(BraketAhsDevice):
         task = self._device.run(discretized_ahs_program, shots=self.shots)
 
     def _validate_pulses(self, pulses):
-
         if len(pulses) > 1:
             raise NotImplementedError(
                 f"Multiple pulses in a Rydberg Hamiltonian are not currently supported on "
-                f"hardware. Recieved {len(pulses)} pulses.")
+                f"hardware. Recieved {len(pulses)} pulses."
+            )
 
         if pulses[0].wires != self.wires:
             raise NotImplementedError(
                 f"Only global drive is currently supported on hardware. Found drive defined for subset "
-                f"{[pulses[0].wires]} of all wires [{self.wires}]")
+                f"{[pulses[0].wires]} of all wires [{self.wires}]"
+            )
 
 
 class BraketLocalAquilaDevice(BraketAhsDevice):
@@ -314,12 +313,7 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
     name = "Braket QuEra Aquila PennyLane plugin"
     short_name = "braket.local.aquila"
 
-    def __init__(
-            self,
-            wires,
-            *,
-            shots=100):
-
+    def __init__(self, wires, *, shots=100):
         dev = LocalSimulator("braket_ahs")
         print(shots)
         super().__init__(wires=wires, device=dev, shots=shots)
@@ -329,15 +323,32 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
         return task
 
     def _validate_pulses(self, pulses):
+        # Iterate through pulses to find global drive
+        max_wires = 0
+        for i, pulse in enumerate(pulses):
+            if len(pulse.wires) > max_wires:
+                max_wires = len(pulse.wires)
+                global_index = i
 
-        # ToDo: allow local drive
+        local_pulses = pulses.copy()
+        global_pulse = local_pulses.pop(global_index)
 
-        if len(pulses) > 1:
-            raise NotImplementedError(
-                f"Multiple pulses in a Rydberg Hamiltonian are not currently supported on "
-                f"hardware. Recieved {len(pulses)} pulses.")
+        # Validate that global drive covers all wires
+        if global_pulse.wires != self.wires:
+            raise ValueError(
+                "No global drive has been defined. Found drive defined for subset "
+                f"{[global_pulse.wires]} of all wires [{self.wires}]"
+            )
 
-        if pulses[0].wires != self.wires:
-            raise NotImplementedError(
-                f"Only global drive is currently supported on hardware. Found drive defined for subset "
-                f"{[pulses[0].wires]} of all wires [{self.wires}]")
+        # Validate that local drives don't have amplitude or phase, and detuning is not time-dependent
+        for pulse in local_pulses:
+            if pulse.amplitude is not None and pulse.amplitude != 0.0:
+                raise ValueError(
+                    "Shifting field only allows specification of detuning. Amplitude must be zero."
+                )
+            if pulse.phase is not None and pulse.phase != 0.0:
+                raise ValueError(
+                    "Shifting field only allows specification of detuning. Phase must be zero."
+                )
+            if callable(pulse.detuning):
+                raise ValueError("Detuning of shifting field must be constant in time.")
