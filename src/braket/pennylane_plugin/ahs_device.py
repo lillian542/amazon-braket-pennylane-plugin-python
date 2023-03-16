@@ -112,7 +112,6 @@ class BraketAhsDevice(QubitDevice):
     def _validate_pulses(self, pulses):
         raise NotImplementedError("Validation of pulses not implemented in the base class")
 
-    # could be static method or just completely separate from the class
     def _create_register(self, coordinates):
         """Create an AtomArrangement to describe the atom layout from the coordinates in the ParametrizedEvolution"""
         register = AtomArrangement()
@@ -153,11 +152,9 @@ class BraketAhsDevice(QubitDevice):
 
         self.pulses = pulses
 
-    # ToDo: should the 50ns number instead be retrieved from the HW dict (when connected to HW)?
-    # could be static
     def _get_sample_times(self, time_interval):
         """Takes a time interval and returns an array of times with a minimum of 50ns spacing"""
-        # time_interval from PL is in microseconds
+        # time_interval from PL is in microseconds, we convert to ns
         interval_ns = np.array(time_interval) * 1e3
         timespan = interval_ns[1] - interval_ns[0]
 
@@ -173,7 +170,6 @@ class BraketAhsDevice(QubitDevice):
         # we return time in seconds
         return times / 1e9
 
-    # could be static?
     def _convert_to_time_series(self, pulse_parameter, time_points, scaling_factor=1):
         """Converts pulse information into a TimeSeries
 
@@ -202,7 +198,6 @@ class BraketAhsDevice(QubitDevice):
 
         return ts
 
-    # could be static?
     def _convert_pulse_to_driving_field(self, pulse, time_interval):
         """Converts a ``RydbergPulse`` from PennyLane describing a global drive to a ``DrivingField``
         from Braket AHS
@@ -243,7 +238,7 @@ class BraketAhsDevice(QubitDevice):
 
         # if entire measurement failed, all NaN
         if not res.status.value.lower() == 'success':
-            return [np.NaN, np.NaN, np.NaN]
+            return [np.NaN for i in res.pre_sequence]
 
         # if a single atom failed to initialize, NaN for that individual measurement
         pre_sequence = [i if i else np.NaN for i in res.pre_sequence]
@@ -321,11 +316,10 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
             shots=100):
 
         dev = LocalSimulator("braket_ahs")
-        print(shots)
         super().__init__(wires=wires, device=dev, shots=shots)
 
     def _run_task(self, ahs_program):
-        task = self._device.run(self.ahs_program, shots=self.shots, steps=100)
+        task = self._device.run(ahs_program, shots=self.shots, steps=100)
         return task
 
     def _validate_pulses(self, pulses):
@@ -334,10 +328,10 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
 
         if len(pulses) > 1:
             raise NotImplementedError(
-                f"Multiple pulses in a Rydberg Hamiltonian are not currently supported on "
-                f"hardware. Recieved {len(pulses)} pulses.")
+                f"Multiple pulses in a Rydberg Hamiltonian are not currently supported. "
+                f"Recieved {len(pulses)} pulses.")
 
         if pulses[0].wires != self.wires:
             raise NotImplementedError(
-                f"Only global drive is currently supported on hardware. Found drive defined for subset "
+                f"Only global drive is currently supported. Found drive defined for subset "
                 f"{[pulses[0].wires]} of all wires [{self.wires}]")
