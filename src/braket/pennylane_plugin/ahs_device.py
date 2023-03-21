@@ -336,7 +336,7 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
 
         # Validate that local drives don't have amplitude or phase, and detuning is not time-dependent
         for pulse in local_pulses:
-            if pulse.amplitude is not None and pulse.amplitude != 0.0:
+            if pulse.amplitude is not None and not qml.math.isclose(pulse.amplitude, 0.0):
                 raise ValueError(
                     "Shifting field only allows specification of detuning. Amplitude must be zero."
                 )
