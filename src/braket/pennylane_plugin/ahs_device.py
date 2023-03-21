@@ -37,8 +37,8 @@ class BraketAhsDevice(QubitDevice):
             *,
             shots=100):
 
-        if shots is None:
-            raise RuntimeError("Number of shots must be defined. Recieved shots=None")
+        if not shots:
+            raise RuntimeError(f"This device requires shots. Recieved shots={shots}")
         self._device = device
         super().__init__(wires=wires, shots=shots)
 
