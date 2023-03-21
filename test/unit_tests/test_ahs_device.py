@@ -61,12 +61,13 @@ params_amp = [2.5, 0.9, 0.3]
 
 HAMILTONIANS_AND_PARAMS = [(H_i + rydberg_drive(amplitude=4, phase=1, detuning=3, wires=[0, 1, 2]), []),
                 (H_i + rydberg_drive(amplitude=amp, phase=1, detuning=2, wires=[0, 1, 2]), [params_amp]),
-                # (H_i + rydberg_drive(amplitude=2, phase=f1, detuning=2, wires=[0, 1, 2]), [params1]),
+                (H_i + rydberg_drive(amplitude=2, phase=f1, detuning=2, wires=[0, 1, 2]), [params1]),
                 (H_i + rydberg_drive(amplitude=amp, phase=1, detuning=f2, wires=[0, 1, 2]), [params_amp, params2]),
-                # (H_i + rydberg_drive(amplitude=4, phase=f2, detuning=f1, wires=[0, 1, 2]), [params2, params1]),
-                # (H_i + rydberg_drive(amplitude=amp, phase=f2, detuning=4, wires=[0, 1, 2]), [params_amp, params2]),
-                # (H_i + rydberg_drive(amplitude=amp, phase=f2, detuning=f1, wires=[0, 1, 2]), [params_amp, params2, params1])
+                (H_i + rydberg_drive(amplitude=4, phase=f2, detuning=f1, wires=[0, 1, 2]), [params2, params1]),
+                (H_i + rydberg_drive(amplitude=amp, phase=f2, detuning=4, wires=[0, 1, 2]), [params_amp, params2]),
+                (H_i + rydberg_drive(amplitude=amp, phase=f2, detuning=f1, wires=[0, 1, 2]), [params_amp, params2, params1])
                 ]
+
 
 DEV_ATTRIBUTES = [(BraketAquilaDevice, "Aquila", "braket.aws.aquila"),
                   (BraketLocalAquilaDevice, "RydbergAtomSimulator", "braket.local.aquila")]
@@ -162,10 +163,11 @@ class TestBraketAhsDevice:
         dev = dev_cls(wires=3, shots=shots)
         assert dev.shots == shots
 
-    def test_shots_is_none_raises_error(self):
-        """Test that setting shots changes number of shots from default (100)"""
-        with pytest.raises(RuntimeError, match="Number of shots must be defined"):
-            BraketLocalAquilaDevice(wires=3, shots=None)
+    @pytest.mark.parametrize("shots", [0, None])
+    def test_no_shots_raises_error(self, shots):
+        """Test that an error is raised if shots are set to 0 or None"""
+        with pytest.raises(RuntimeError, match="This device requires shots"):
+            BraketLocalAquilaDevice(wires=3, shots=shots)
 
     @pytest.mark.parametrize("dev_cls, wires", [(BraketAquilaDevice, 2),
                                                 (BraketAquilaDevice, [0, 2, 4]),
