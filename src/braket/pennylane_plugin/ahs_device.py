@@ -37,6 +37,8 @@ class BraketAhsDevice(QubitDevice):
             *,
             shots=100):
 
+        if shots is None:
+            raise RuntimeError("Number of shots must be defined. Recieved shots=None")
         self._device = device
         super().__init__(wires=wires, shots=shots)
 
@@ -122,10 +124,10 @@ class BraketAhsDevice(QubitDevice):
     def _create_register(self, coordinates):
         """Create an AtomArrangement to describe the atom layout from the coordinates in the ParametrizedEvolution"""
 
-
         register = AtomArrangement()
         for [x, y] in coordinates:
-            register.add([x * 1e-6, y * 1e-6])  # PL asks users to specify in um, Braket expects SI units
+            # PL asks users to specify in um, Braket expects SI units
+            register.add([x*1e-6, y*1e-6])
 
         self.register = register
 
@@ -297,6 +299,7 @@ class BraketAquilaDevice(BraketAhsDevice):
     def _run_task(self, ahs_program):
         discretized_ahs_program = ahs_program.discretize(self._device)
         task = self._device.run(discretized_ahs_program, shots=self.shots)
+        return task
 
     def _validate_pulses(self, pulses):
 
@@ -341,8 +344,6 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
         return task
 
     def _validate_pulses(self, pulses):
-
-        # ToDo: allow local drive
 
         if len(pulses) > 1:
             raise NotImplementedError(
