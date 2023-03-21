@@ -126,11 +126,12 @@ DUMMY_RESULTS = [(DummyMeasurementResult(Status('Success'), np.array([1]), np.ar
            ]
 
 
-@pytest.mark.parametrize("shots", [2, 1003])
+
 class TestBraketAhsDevice:
     """Tests that behaviour defined for both the LocalSimulator and the
     Aquila hardware in the base device work as expected"""
 
+    @pytest.mark.parametrize("shots", [2, 1003])
     @pytest.mark.parametrize("dev_cls, name, short_name", DEV_ATTRIBUTES)
     def test_initialization(self, dev_cls, name, short_name, shots):
         """Test the device initializes with the expected attributes"""
@@ -139,12 +140,11 @@ class TestBraketAhsDevice:
 
         assert dev._device.name == name
         assert dev.short_name == short_name
-        assert dev.shots == 100
+        assert dev.shots == shots
         assert dev.ahs_program is None
         assert dev.samples is None
         assert dev.pennylane_requires == ">=0.29.0"
         assert dev.operations == {"ParametrizedEvolution"}
-        assert dev.shots == shots
 
     def test_settings(self):
         dev = dev_sim
@@ -161,6 +161,11 @@ class TestBraketAhsDevice:
         """Test that setting shots changes number of shots from default (100)"""
         dev = dev_cls(wires=3, shots=shots)
         assert dev.shots == shots
+
+    def test_shots_is_none_raises_error(self):
+        """Test that setting shots changes number of shots from default (100)"""
+        with pytest.raises(RuntimeError, match="Number of shots must be defined"):
+            BraketLocalAquilaDevice(wires=3, shots=None)
 
     @pytest.mark.parametrize("dev_cls, wires", [(BraketAquilaDevice, 2),
                                                 (BraketAquilaDevice, [0, 2, 4]),
@@ -423,44 +428,6 @@ class TestBraketAhsDevice:
         assert isinstance(output, np.ndarray)
         assert len(output) == len(res.post_sequence)
         assert np.allclose(output, expected_output, equal_nan=True)
-
-
-# are we supposed to do any hardware device tests? or is accessing hardware for tests bad?
-class TestBraketAquilaDevice:
-    """Test functionality specific to the hardware device that can be tested
-    without running a task on the hardware"""
-
-    def test_hardware_capabilities(self):
-        """Test hardware capabilities can be retrieved"""
-
-        assert isinstance(dev_hw.hardware_capabilities, dict)
-        assert 'rydberg' in dev_hw.hardware_capabilities.keys()
-        assert 'lattice' in dev_hw.hardware_capabilities.keys()
-
-    def test_validate_operations_multiple_drive_terms(self):
-        """Test that an error is raised if there are multiple drive terms on
-        the Hamiltonian"""
-        pulses = [RydbergPulse(3, 4, 5, [0, 1]), RydbergPulse(4, 6, 7, [1, 2])]
-
-        with pytest.raises(NotImplementedError, match="Multiple pulses in a Rydberg Hamiltonian are not currently supported"):
-            dev_hw._validate_pulses(pulses)
-
-    @pytest.mark.parametrize("pulse_wires, dev_wires, res", [([0, 1, 2], [0, 1, 2, 3], 'error'),
-                                                             ([5, 6, 7, 8, 9], [4, 5, 6, 7, 8], 'error'),
-                                                             ([0, 1, 2, 3, 6], [1, 2, 3], 'error'),
-                                                             ([0, 1, 2], [0, 1, 2], 'success')])
-    def test_validate_pulse_is_global_drive(self, pulse_wires, dev_wires, res):
-        """Test that an error is raised if the pulse does not describe a global drive"""
-
-        dev = BraketAquilaDevice(wires=dev_wires)
-        pulse = RydbergPulse(3, 4, 5, pulse_wires)
-
-        if res == 'error':
-            with pytest.raises(NotImplementedError, match="Only global drive is currently supported"):
-                dev._validate_pulses([pulse])
-        else:
-            dev._validate_pulses([pulse])
-
 
 
 class TestLocalAquilaDevice:
