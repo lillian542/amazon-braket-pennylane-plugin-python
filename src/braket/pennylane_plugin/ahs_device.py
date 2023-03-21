@@ -40,11 +40,20 @@ class BraketAhsDevice(QubitDevice):
         self._device = device
         super().__init__(wires=wires, shots=shots)
 
+        self.register = None
         self.ahs_program = None
         self.samples = None
 
+    @property
+    def settings(self):
+        return {'interaction_coefficient': 862690}  # MHz x um^6
+
     def apply(self, operations, **kwargs):
         """Convert the pulse operation to an AHS program and run on the connected device"""
+
+        if not np.all([op.name in self.operations for op in operations]):
+            raise NotImplementedError("Device {self.short_name} expected only operations "
+                                      "{self.operations} but recieved {operations}")
 
         self._validate_operations(operations)
 
@@ -66,10 +75,8 @@ class BraketAhsDevice(QubitDevice):
             AnalogHamiltonianSimulation: a program containing the register and drive
                 information for running an AHS task on simulation or hardware"""
 
-        params = evolution.parameters
-
         # sets self.pulses to be the evaluated pulses (now only a function of time)
-        self._evaluate_pulses(evolution, params)
+        self._evaluate_pulses(evolution)
         self._create_register(evolution.H.register)
 
         time_interval = evolution.t
@@ -114,43 +121,51 @@ class BraketAhsDevice(QubitDevice):
 
     def _create_register(self, coordinates):
         """Create an AtomArrangement to describe the atom layout from the coordinates in the ParametrizedEvolution"""
+
+
         register = AtomArrangement()
         for [x, y] in coordinates:
             register.add([x * 1e-6, y * 1e-6])  # PL asks users to specify in um, Braket expects SI units
 
         self.register = register
 
-    def _evaluate_pulses(self, ev_op, params):
+    def _evaluate_pulses(self, ev_op):
         """Feeds in the parameters in order to partially evaluate the callables (amplitude, phase and/or detuning)
-        describing the pulses, so they are only a function of time
+        describing the pulses, so they are only a function of time. Saves the on the device as `dev.pulses`.
 
         Args:
             ev_op(ParametrizedEvolution): the operator containing the pulses to be evaluated
             params(list): a list of the parameters to be passed to the respective callables
         """
 
-        # ToDo: what happens if H.pulses is an empty list? I.e. if only interaction term
+        params = ev_op.parameters
         pulses = ev_op.H.pulses
-        coeffs = ev_op.H.coeffs_parametrized
 
-        evaluated_coeffs = [partial(fn, param) for fn, param in zip(coeffs, params)]
-
+        evaluated_pulses = []
         idx = 0
 
         for pulse in pulses:
+            amplitude = pulse.amplitude
             if callable(pulse.amplitude):
-                pulse.amplitude = evaluated_coeffs[idx]
+                amplitude = partial(pulse.amplitude, params[idx])
                 idx += 1
 
-            if callable(pulse.detuning):
-                pulse.detuning = evaluated_coeffs[idx]
-                idx += 1
-
+            phase = pulse.phase
             if callable(pulse.phase):
-                pulse.phase = evaluated_coeffs[idx]
+                phase = partial(pulse.phase, params[idx])
                 idx += 1
 
-        self.pulses = pulses
+            detuning = pulse.detuning
+            if callable(pulse.detuning):
+                detuning = partial(pulse.detuning, params[idx])
+                idx += 1
+
+            evaluated_pulses.append(RydbergPulse(amplitude=amplitude,
+                                                 phase=phase,
+                                                 detuning=detuning,
+                                                 wires=pulse.wires))
+
+        self.pulses = evaluated_pulses
 
     def _get_sample_times(self, time_interval):
         """Takes a time interval and returns an array of times with a minimum of 50ns spacing"""
@@ -175,7 +190,7 @@ class BraketAhsDevice(QubitDevice):
 
         Args:
             pulse_parameter(Union[float, Callable]): a physical parameter (pulse, amplitude or detuning) of the
-                pulse. If this is a callalbe, it has alreayd been partially evaluated, such that it is only a
+                pulse. If this is a callalbe, it has already been partially evaluated, such that it is only a
                 function of time.
             time_points(array): the times where parameters will be set in the TimeSeries, specified in seconds
             scaling_factor(float): A multiplication factor for the pulse_parameter where relevant to convert
@@ -238,7 +253,7 @@ class BraketAhsDevice(QubitDevice):
 
         # if entire measurement failed, all NaN
         if not res.status.value.lower() == 'success':
-            return [np.NaN for i in res.pre_sequence]
+            return np.array([np.NaN for i in res.pre_sequence])
 
         # if a single atom failed to initialize, NaN for that individual measurement
         pre_sequence = [i if i else np.NaN for i in res.pre_sequence]
@@ -284,6 +299,9 @@ class BraketAquilaDevice(BraketAhsDevice):
         task = self._device.run(discretized_ahs_program, shots=self.shots)
 
     def _validate_pulses(self, pulses):
+
+        if not pulses:
+            raise RuntimeError("No pulses found in the ParametrizedEvolution")
 
         if len(pulses) > 1:
             raise NotImplementedError(
