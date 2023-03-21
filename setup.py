@@ -28,7 +28,8 @@ setup(
     package_dir={"": "src"},
     install_requires=[
         "amazon-braket-sdk>=1.35.0",
-        "pennylane==0.29.1",
+        # "pennylane=0.30.0"
+        "pennylane @ git+https://github.com/PennyLaneAI/pennylane.git",
     ],
     entry_points={
         "pennylane.plugins": [
@@ -39,6 +40,8 @@ setup(
             # `pennylane.device` device loader.
             "braket.aws.qubit = braket.pennylane_plugin:BraketAwsQubitDevice",
             "braket.local.qubit = braket.pennylane_plugin:BraketLocalQubitDevice",
+            "braket.aws.aquila = braket.pennylane_plugin:BraketAquilaDevice",
+            "braket.local.aquila = braket.pennylane_plugin:BraketLocalAquilaDevice",
         ]
     },
     extras_require={
@@ -61,6 +64,8 @@ setup(
             "tox",
             "tensorflow>=2.6.0",
             "torch>=1.11",
+            "jax==0.4.3",
+            "jaxlib==0.4.3"
         ]
     },
     url="https://github.com/aws/amazon-braket-pennylane-plugin-python",
