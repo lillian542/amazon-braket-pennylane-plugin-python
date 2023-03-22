@@ -268,15 +268,50 @@ class TestBraketAhsDevice:
         with pytest.raises(NotImplementedError, match="Support for multiple ParametrizedEvolution operators"):
             dev_sim._validate_operations([op1, op2])
 
+    def test_validate_operations_wires_match_device(self):
+        """Test that an error is raised if the wires on the Hamiltonian
+        don't match the wires on the device."""
+        H = H_i + rydberg_drive(3, 2, 2, wires=[0, 1, 2])
+
+        dev1 = BraketLocalAquilaDevice(wires=len(H.wires)-1)
+        dev2 = BraketLocalAquilaDevice(wires=len(H.wires)+1)
+
+        with pytest.raises(RuntimeError, match="Device wires must match wires of the evolution."):
+            dev1._validate_operations([qml.evolve(H)([], 1)])
+
+        with pytest.raises(RuntimeError, match="Device wires must match wires of the evolution."):
+            dev2._validate_operations([qml.evolve(H)([], 1)])
+
+    def test_validate_operations_register_matches_wires(self):
+        """Test that en error is raised in the length of the register doesn't match
+        the number of wires on the device"""
+
+        # register has wires [0, 1, 2], drive has wire [3]
+        # creating a Hamiltonian like this in PL will raise a warning, but not an error
+        H = H_i + rydberg_drive(3, 2, 2, wires=3)
+
+        # device wires [0, 1, 2, 3] match overall wires, but not length of register
+        dev = BraketLocalAquilaDevice(wires=4)
+
+        with pytest.raises(RuntimeError, match="The defined interaction term has register"):
+            dev._validate_operations([qml.evolve(H)([], 1)])
+
     def test_validate_operations_not_rydberg_hamiltonian(self):
         """Test that an error is raised if the ParametrizedHamiltonian on the operator
         is not a RydbergHamiltonian and so does not contain pulse upload information"""
 
-        H1 = 2 * qml.PauliX(0) + f1 * qml.PauliY(1)
+        H1 = 2 * qml.PauliX(0) + f1 * qml.PauliY(1) + f2 * qml.PauliZ(2)
         op1 = qml.evolve(H1)
 
         with pytest.raises(RuntimeError, match="Expected a RydbergHamiltonian instance"):
             dev_sim._validate_operations([op1])
+
+    def test_validate_pulses_no_pulses(self):
+        """Test that _validate_pulses raises an error if there are no pulses saved
+        on the Hamiltonian"""
+
+        with pytest.raises(RuntimeError, match="No pulses found"):
+            dev_sim._validate_pulses(H_i.pulses)
 
     @pytest.mark.parametrize("coordinates", [coordinates1, coordinates2])
     def test_create_register(self, coordinates):

@@ -116,6 +116,15 @@ class BraketAhsDevice(QubitDevice):
                 f"Expected a RydbergHamiltonian instance for interfacing with the device, but "
                 f"recieved {type(ev_op.H)}.")
 
+        if not set(ev_op.wires) == set(self.wires):
+            raise RuntimeError(f'Device contains wires {self.wires}, but received a `ParametrizedEvolution` operator '
+                               f'working on wires {ev_op.wires}. Device wires must match wires of the evolution.')
+
+        if len(ev_op.H.register) != len(self.wires):
+            raise RuntimeError(f'The defined interaction term has register {ev_op.H.register} of length '
+                               f'{len(ev_op.H.register)}, which does not match the number of wires on the device '
+                               f'({len(self.wires)})')
+
         self._validate_pulses(ev_op.H.pulses)
 
     def _validate_pulses(self, pulses):
@@ -344,6 +353,9 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
         return task
 
     def _validate_pulses(self, pulses):
+
+        if not pulses:
+            raise RuntimeError("No pulses found in the ParametrizedEvolution")
 
         if len(pulses) > 1:
             raise NotImplementedError(
