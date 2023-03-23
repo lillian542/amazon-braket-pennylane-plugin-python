@@ -18,7 +18,7 @@ import pennylane as qml
 import pkg_resources
 import pytest
 from conftest import shortname_and_backends
-from jax import numpy as jnp
+# from jax import numpy as jnp
 
 from pennylane.pulse.rydberg_hamiltonian import rydberg_drive, rydberg_interaction, RydbergPulse
 
@@ -32,6 +32,7 @@ shortname_and_backendname = [("braket.local.aquila", "RydbergAtomSimulator"),
 # =========================================================
 coordinates = [[0, 0], [0, 5], [5, 0]]  # in micrometers
 
+
 def f1(p, t):
     return p * np.sin(t) * (t - 1)
 
@@ -42,7 +43,7 @@ def f2(p, t):
 
 # realistic amplitude function (0 at start and end for hardware)
 def amp(p, t):
-    f = p[0] * jnp.exp(-(t-p[1])**2/(2*p[2]**2))
+    f = p[0] * np.exp(-(t-p[1])**2/(2*p[2]**2))
     return qml.pulse.rect(f, windows=[0.1, 1.7])(p, t)
 
 params1 = 1.2
@@ -138,7 +139,7 @@ class TestDeviceAttributes:
         assert dev.shots == shots
 
         global_drive = rydberg_drive(2, 1, 2, wires=[0, 1, 2])
-        ts = jnp.array([0.0, 1.75])
+        ts = np.array([0.0, 1.75])
 
         @qml.qnode(dev)
         def circuit():

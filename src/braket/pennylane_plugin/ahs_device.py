@@ -11,7 +11,7 @@ from braket.timings.time_series import TimeSeries
 
 from pennylane import QubitDevice
 from pennylane._version import __version__
-from pennylane.pulse.rydberg_hamiltonian import RydbergHamiltonian, RydbergPulse
+from pennylane.pulse.hardware_hamiltonian import HardwareHamiltonian, HardwarePulse
 
 
 class BraketAhsDevice(QubitDevice):
@@ -107,7 +107,7 @@ class BraketAhsDevice(QubitDevice):
 
     def _validate_operations(self, operations):
         """Confirms that the list of operations provided contains a single ParametrizedEvolution
-        from a RydbergHamiltonian with only a single, global pulse"""
+        from a HardwareHamiltonian with only a single, global pulse"""
 
         if len(operations) > 1:
             raise NotImplementedError(
@@ -116,9 +116,9 @@ class BraketAhsDevice(QubitDevice):
 
         ev_op = operations[0]  # only one!
 
-        if not isinstance(ev_op.H, RydbergHamiltonian):
+        if not isinstance(ev_op.H, HardwareHamiltonian):
             raise RuntimeError(
-                f"Expected a RydbergHamiltonian instance for interfacing with the device, but "
+                f"Expected a HardwareHamiltonian instance for interfacing with the device, but "
                 f"recieved {type(ev_op.H)}.")
 
         if not set(ev_op.wires) == set(self.wires):
@@ -174,7 +174,7 @@ class BraketAhsDevice(QubitDevice):
                 detuning = partial(pulse.detuning, params[idx])
                 idx += 1
 
-            evaluated_pulses.append(RydbergPulse(amplitude=amplitude,
+            evaluated_pulses.append(HardwarePulse(amplitude=amplitude,
                                                  phase=phase,
                                                  detuning=detuning,
                                                  wires=pulse.wires))
@@ -228,11 +228,11 @@ class BraketAhsDevice(QubitDevice):
         return ts
 
     def _convert_pulse_to_driving_field(self, pulse, time_interval):
-        """Converts a ``RydbergPulse`` from PennyLane describing a global drive to a ``DrivingField``
+        """Converts a ``HardwarePulse`` from PennyLane describing a global drive to a ``DrivingField``
         from Braket AHS
 
         Args:
-            pulse[RydbergPulse]: a dataclass object containing amplitude, phase and detuning information
+            pulse[HardwarePulse]: a dataclass object containing amplitude, phase and detuning information
             time_interval(array[Number, Number]]): The start and end time for the applied pulse
 
         Returns:
@@ -322,7 +322,7 @@ class BraketAquilaDevice(BraketAhsDevice):
 
         if len(pulses) > 1:
             raise NotImplementedError(
-                f"Multiple pulses in a Rydberg Hamiltonian are not currently supported on "
+                f"Multiple pulses in a Hamiltonian are not currently supported on "
                 f"hardware. Recieved {len(pulses)} pulses.")
 
         if pulses[0].wires != self.wires:
