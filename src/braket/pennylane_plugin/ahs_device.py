@@ -6,7 +6,10 @@ from braket.devices import LocalSimulator
 from braket.ahs.atom_arrangement import AtomArrangement
 from braket.ahs.analog_hamiltonian_simulation import AnalogHamiltonianSimulation
 from braket.ahs.driving_field import DrivingField
+from braket.ahs.shifting_field import ShiftingField
 from braket.timings.time_series import TimeSeries
+from braket.ahs.field import Field
+from braket.ahs.pattern import Pattern
 
 from pennylane import QubitDevice
 from pennylane._version import __version__
@@ -31,13 +34,7 @@ class BraketAhsDevice(QubitDevice):
 
     operations = {"ParametrizedEvolution"}
 
-    def __init__(
-            self,
-            wires,
-            device,
-            *,
-            shots=100):
-
+    def __init__(self, wires, device, *, shots=100):
         if not shots:
             raise RuntimeError(f"This device requires shots. Recieved shots={shots}")
         self._device = device
@@ -49,14 +46,16 @@ class BraketAhsDevice(QubitDevice):
 
     @property
     def settings(self):
-        return {'interaction_coefficient': 862690}  # MHz x um^6
+        return {"interaction_coefficient": 862690}  # MHz x um^6
 
     def apply(self, operations, **kwargs):
         """Convert the pulse operation to an AHS program and run on the connected device"""
 
         if not np.all([op.name in self.operations for op in operations]):
-            raise NotImplementedError("Device {self.short_name} expected only operations "
-                                      "{self.operations} but recieved {operations}")
+            raise NotImplementedError(
+                "Device {self.short_name} expected only operations "
+                "{self.operations} but recieved {operations}"
+            )
 
         self._validate_operations(operations)
 
@@ -120,13 +119,17 @@ class BraketAhsDevice(QubitDevice):
             )
 
         if not set(ev_op.wires) == set(self.wires):
-            raise RuntimeError(f'Device contains wires {self.wires}, but received a `ParametrizedEvolution` operator '
-                               f'working on wires {ev_op.wires}. Device wires must match wires of the evolution.')
+            raise RuntimeError(
+                f"Device contains wires {self.wires}, but received a `ParametrizedEvolution` operator "
+                f"working on wires {ev_op.wires}. Device wires must match wires of the evolution."
+            )
 
         if len(ev_op.H.register) != len(self.wires):
-            raise RuntimeError(f'The defined interaction term has register {ev_op.H.register} of length '
-                               f'{len(ev_op.H.register)}, which does not match the number of wires on the device '
-                               f'({len(self.wires)})')
+            raise RuntimeError(
+                f"The defined interaction term has register {ev_op.H.register} of length "
+                f"{len(ev_op.H.register)}, which does not match the number of wires on the device "
+                f"({len(self.wires)})"
+            )
 
         self._validate_pulses(ev_op.H.pulses)
 
@@ -139,7 +142,7 @@ class BraketAhsDevice(QubitDevice):
         register = AtomArrangement()
         for [x, y] in coordinates:
             # PL asks users to specify in um, Braket expects SI units
-            register.add([x*1e-6, y*1e-6])
+            register.add([x * 1e-6, y * 1e-6])
 
         self.register = register
 
@@ -174,10 +177,9 @@ class BraketAhsDevice(QubitDevice):
                 detuning = partial(pulse.detuning, params[idx])
                 idx += 1
 
-            evaluated_pulses.append(RydbergPulse(amplitude=amplitude,
-                                                 phase=phase,
-                                                 detuning=detuning,
-                                                 wires=pulse.wires))
+            evaluated_pulses.append(
+                RydbergPulse(amplitude=amplitude, phase=phase, detuning=detuning, wires=pulse.wires)
+            )
 
         self.pulses = evaluated_pulses
 
@@ -271,7 +273,7 @@ class BraketAhsDevice(QubitDevice):
         """
 
         # if entire measurement failed, all NaN
-        if not res.status.value.lower() == 'success':
+        if not res.status.value.lower() == "success":
             return np.array([np.NaN for i in res.pre_sequence])
 
         # if a single atom failed to initialize, NaN for that individual measurement
@@ -314,7 +316,6 @@ class BraketAquilaDevice(BraketAhsDevice):
         return task
 
     def _validate_pulses(self, pulses):
-
         if not pulses:
             raise RuntimeError("No pulses found in the ParametrizedEvolution")
 
@@ -353,13 +354,98 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
         task = self._device.run(ahs_program, shots=self.shots, steps=100)
         return task
 
+    def _extract_pattern_from_detunings(self, detunings, time_points):
+        """Use the detunings as defined in PennyLane to find the pattern for the ``ShiftingField``
+
+        Args:
+            detunings (List[Union[float, callable]]): detunings to extract pattern from
+            time_points (List[float]): the times where parameters will be set in the TimeSeries, specified
+                in seconds
+
+        Returns:
+            Union[float, callable]: Updated detuning for ``ShiftingField``
+            Pattern: Pattern object containing magnitude of detunings for individual atoms in the device
+        """
+        # If a single item is not callable, no others should be callable. This validation happens in
+        # ``_validate_pulses``.
+        if not callable(detunings[0]):
+            max_detuning = np.amax(detunings)
+            pattern = [det / max_detuning for det in detunings]
+            return max_detuning, Pattern(pattern)
+
+        evaluated_detunings = [[float(detuning(t * 1e6)) for t in time_points] for detuning in detunings]
+        pattern = []
+
+        # Find pattern if callable detuning
+        for i in range(len(time_points)):
+            time_slice = evaluated_detunings[:, i]
+
+            if not np.allclose(time_slice, 0.0):
+                _max = np.amax(time_slice)
+                max_index = int(np.argmax(time_slice))
+                max_detuning = detunings[max_index]
+                pattern = [det / _max for det in time_slice]
+                break
+
+        if pattern == []:
+            max_detuning = 0
+            pattern = [1.0] * len(detunings)
+
+        # Validate that detunings follow pattern along all time steps
+        for i, t in enumerate(time_points):
+            time_slice = evaluated_detunings[:, i]
+            new_time_slice = [p * float(max_detuning(t)) for p in pattern]
+            if not np.allclose(time_slice, new_time_slice):
+                raise ValueError(
+                    "Local detunings don't match. Make sure that all local detunings match "
+                    "in shape and only differ in magnitude."
+                )
+
+        return max_detuning, Pattern(pattern)
+
+    def _convert_pulses_to_shifting_field(self, detuning, pattern, time_interval):
+        """Uses the list of ``RydbergPulse`` objects from PennyLane to create a ``ShiftingField`` object from
+        AWS Braket.
+
+        Args:
+            detuning (callable): detuning for the local drives
+            pattern (Pattern): list containing magnitude of detuning for all atoms in the device
+            time_interval(array[Number, Number]]): The start and end time for the applied pulse
+
+        Returns:
+            ShiftingField: the object representing the local drive for the AnalogueHamiltonianSimulation object
+        """
+        time_points = self._get_sample_times(time_interval)
+        ts_detuning = self._convert_to_time_series(
+            detuning, time_points, scaling_factor=2 * np.pi * 1e6
+        )
+        shift = ShiftingField(magnitude=Field(time_series=ts_detuning, pattern=pattern))
+
+        return shift
+
     def _validate_pulses(self, pulses):
+        """Validate that all pulses are defined as expected by the device. This validation includes:
+
+        * Verifying that a global drive is present
+        * Verifying that all local pulses have zero amplitude and phase
+        * Verifying that there are no overlapping wires among the local drives
+        * Verifying that all local detunings are of the same type (float or callable)
+
+        Args:
+            pulses (List[RydbergPulse]): List containing all pulses
+
+        Raises:
+            ValueError: if pulses are invalid
+        """
+
         # Iterate through pulses to find global drive
         global_index = -1
         for i, pulse in enumerate(pulses):
             if len(pulse.wires) == self.wires:
                 if global_index != -1:
-                    raise ValueError("Cannot execute a ParametrizedEvolution with multiple global drives.")
+                    raise ValueError(
+                        "Cannot execute a ParametrizedEvolution with multiple global drives."
+                    )
                 global_index = i
 
         # Validate that global drive covers all wires
@@ -381,21 +467,21 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
         local_wires = set()
 
         for pulse in local_pulses:
-            if pulse.amplitude is not None and (callable(pulse.amplitude) or not math.isclose(pulse.amplitude, 0.0)):
+            if pulse.amplitude is not None and (
+                callable(pulse.amplitude) or not math.isclose(pulse.amplitude, 0.0)
+            ):
                 raise ValueError(
                     "Shifting field only allows specification of detuning. Amplitude must be zero."
                 )
-            if pulse.phase is not None and (callable(pulse.phase) or not math.isclose(pulse.phase, 0.0)):
+            if pulse.phase is not None and (
+                callable(pulse.phase) or not math.isclose(pulse.phase, 0.0)
+            ):
                 raise ValueError(
                     "Shifting field only allows specification of detuning. Phase must be zero."
                 )
             if callable(pulse.detuning) and not callable_detunings:
-                raise ValueError(
-                    "All local drives must have the same shape."
-                )
+                raise ValueError("All local drives must have the same shape.")
             if set(pulse.wires).intersection(local_wires):
                 raise ValueError("Local drives must not have overlapping wires.")
 
             local_wires.update(set(pulse.wires))
-
-
