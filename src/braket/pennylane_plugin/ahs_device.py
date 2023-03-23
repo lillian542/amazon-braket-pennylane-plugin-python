@@ -373,7 +373,9 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
             pattern = [det / max_detuning for det in detunings]
             return max_detuning, Pattern(pattern)
 
-        evaluated_detunings = [[float(detuning(t * 1e6)) for t in time_points] for detuning in detunings]
+        evaluated_detunings = [
+            [float(detuning(t * 1e6)) for t in time_points] for detuning in detunings
+        ]
         pattern = []
 
         # Find pattern if callable detuning
