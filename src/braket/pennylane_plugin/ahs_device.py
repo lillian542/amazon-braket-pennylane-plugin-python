@@ -11,6 +11,7 @@ from braket.timings.time_series import TimeSeries
 from pennylane import QubitDevice
 from pennylane._version import __version__
 from pennylane.pulse.rydberg_hamiltonian import RydbergHamiltonian, RydbergPulse
+import pennylane.math as math
 
 
 class BraketAhsDevice(QubitDevice):
@@ -346,6 +347,7 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
     def __init__(self, wires, *, shots=100):
         dev = LocalSimulator("braket_ahs")
         super().__init__(wires=wires, device=dev, shots=shots)
+        self._global_pulse = None
 
     def _run_task(self, ahs_program):
         task = self._device.run(ahs_program, shots=self.shots, steps=100)
@@ -353,31 +355,47 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
 
     def _validate_pulses(self, pulses):
         # Iterate through pulses to find global drive
-        max_wires = 0
+        global_index = -1
         for i, pulse in enumerate(pulses):
-            if len(pulse.wires) > max_wires:
-                max_wires = len(pulse.wires)
+            if len(pulse.wires) == self.wires:
+                if global_index != -1:
+                    raise ValueError("Cannot execute a ParametrizedEvolution with multiple global drives.")
                 global_index = i
 
-        local_pulses = pulses.copy()
-        global_pulse = local_pulses.pop(global_index)
-
         # Validate that global drive covers all wires
-        if global_pulse.wires != self.wires:
+        if global_index == -1:
             raise ValueError(
-                "No global drive has been defined. Found drive defined for subset "
-                f"{[global_pulse.wires]} of all wires [{self.wires}]"
+                "ParametrizedEvolution does not define a driving field that applies to all wires."
             )
 
-        # Validate that local drives don't have amplitude or phase, and detuning is not time-dependent
+        self._global_pulse = global_index
+
+        local_pulses = pulses.copy()
+        local_pulses.pop(global_index)
+
+        if len(local_pulses) == 0:
+            return
+
+        # Validate that local drives don't have amplitude or phase, and that various detunings aren't inconsistent
+        callable_detunings = callable(local_pulses[0].detuning)
+        local_wires = set()
+
         for pulse in local_pulses:
-            if pulse.amplitude is not None and not qml.math.isclose(pulse.amplitude, 0.0):
+            if pulse.amplitude is not None and (callable(pulse.amplitude) or not math.isclose(pulse.amplitude, 0.0)):
                 raise ValueError(
                     "Shifting field only allows specification of detuning. Amplitude must be zero."
                 )
-            if pulse.phase is not None and pulse.phase != 0.0:
+            if pulse.phase is not None and (callable(pulse.phase) or not math.isclose(pulse.phase, 0.0)):
                 raise ValueError(
                     "Shifting field only allows specification of detuning. Phase must be zero."
                 )
-            if callable(pulse.detuning):
-                raise ValueError("Detuning of shifting field must be constant in time.")
+            if callable(pulse.detuning) and not callable_detunings:
+                raise ValueError(
+                    "All local drives must have the same shape."
+                )
+            if set(pulse.wires).intersection(local_wires):
+                raise ValueError("Local drives must not have overlapping wires.")
+
+            local_wires.update(set(pulse.wires))
+
+
