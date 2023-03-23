@@ -1,8 +1,9 @@
 from functools import partial
+from typing import Iterable, Union
 import numpy as np
 
 from braket.aws import AwsDevice
-from braket.devices import LocalSimulator
+from braket.devices import Device, LocalSimulator
 from braket.ahs.atom_arrangement import AtomArrangement
 from braket.ahs.analog_hamiltonian_simulation import AnalogHamiltonianSimulation
 from braket.ahs.driving_field import DrivingField
@@ -20,6 +21,7 @@ class BraketAhsDevice(QubitDevice):
         wires (int or Iterable[Number, str]]): Number of subsystems represented by the device,
             or iterable that contains unique labels for the subsystems as numbers
             (i.e., ``[-1, 0, 2]``) or strings (``['ancilla', 'q1', 'q2']``).
+        device (Device): The Amazon Braket device to use with PennyLane.
         shots (int): Number of executions to run to aquire measurements. Defaults to 100.
     """
 
@@ -32,14 +34,15 @@ class BraketAhsDevice(QubitDevice):
 
     def __init__(
             self,
-            wires,
-            device,
+            wires: Union[int, Iterable],
+            device: Device,
             *,
             shots=100):
 
         if not shots:
-            raise RuntimeError(f"This device requires shots. Received shots={shots}")
-        self._device = device
+            raise RuntimeError(f"This device requires shots. Recieved shots={shots}")
+        self._device = backend
+
         super().__init__(wires=wires, shots=shots)
 
         self.register = None
@@ -48,7 +51,7 @@ class BraketAhsDevice(QubitDevice):
 
     @property
     def settings(self):
-        return {'interaction_coefficient': 862690}  # MHz x um^6
+        return {'interaction_coeff': 862690}  # MHz x um^6
 
     def apply(self, operations, **kwargs):
         """Convert the pulse operation to an AHS program and run on the connected device"""
@@ -60,6 +63,8 @@ class BraketAhsDevice(QubitDevice):
         self._validate_operations(operations)
 
         ev_op = operations[0]  # only one!
+
+        self._validate_pulses(ev_op.H.pulses)
 
         ahs_program = self.create_ahs_program(ev_op)
 
@@ -124,8 +129,6 @@ class BraketAhsDevice(QubitDevice):
             raise RuntimeError(f'The defined interaction term has register {ev_op.H.register} of length '
                                f'{len(ev_op.H.register)}, which does not match the number of wires on the device '
                                f'({len(self.wires)})')
-
-        self._validate_pulses(ev_op.H.pulses)
 
     def _validate_pulses(self, pulses):
         raise NotImplementedError("Validation of pulses not implemented in the base class")
@@ -281,6 +284,7 @@ class BraketAquilaDevice(BraketAhsDevice):
             or iterable that contains unique labels for the subsystems as numbers
             (i.e., ``[-1, 0, 2]``) or strings (``['ancilla', 'q1', 'q2']``).
         shots (int): Number of executions to run to aquire measurements. Defaults to 100.
+
     """
 
     name = "Braket QuEra Aquila PennyLane plugin"
@@ -290,12 +294,12 @@ class BraketAquilaDevice(BraketAhsDevice):
 
     def __init__(
             self,
-            wires,
+            wires: Union[int, Iterable],
             *,
             shots=100):
 
-        dev = AwsDevice(self.ARN_NR)
-        super().__init__(wires=wires, device=dev, shots=shots)
+        backend = AwsDevice(self.ARN_NR)
+        super().__init__(wires=wires, backend=backend, shots=shots)
 
         self.ahs_program = None
         self.samples = None
@@ -307,7 +311,8 @@ class BraketAquilaDevice(BraketAhsDevice):
 
     def _run_task(self, ahs_program):
         discretized_ahs_program = ahs_program.discretize(self._device)
-        task = self._device.run(discretized_ahs_program, shots=self.shots)
+        task = self._device.run(discretized_ahs_program,
+                                shots=self.shots)
         return task
 
     def _validate_pulses(self, pulses):
@@ -341,15 +346,17 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
 
     def __init__(
             self,
-            wires,
+            wires: Union[int, Iterable],
             *,
             shots=100):
 
-        dev = LocalSimulator("braket_ahs")
-        super().__init__(wires=wires, device=dev, shots=shots)
+        device = LocalSimulator("braket_ahs")
+        super().__init__(wires=wires, device=device, shots=shots)
 
     def _run_task(self, ahs_program):
-        task = self._device.run(ahs_program, shots=self.shots, steps=100)
+        task = self._device.run(ahs_program,
+                                shots=self.shots,
+                                steps=100)
         return task
 
     def _validate_pulses(self, pulses):
