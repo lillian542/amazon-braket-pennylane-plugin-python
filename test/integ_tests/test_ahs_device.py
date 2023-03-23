@@ -18,6 +18,11 @@ import pennylane as qml
 import pkg_resources
 import pytest
 from conftest import shortname_and_backends
+from jax import numpy as jnp
+
+from pennylane.pulse.rydberg_hamiltonian import rydberg_drive, rydberg_interaction, RydbergPulse
+
+from braket.pennylane_plugin.ahs_device import BraketAquilaDevice, BraketLocalAquilaDevice
 
 ENTRY_POINTS = {entry.name: entry for entry in pkg_resources.iter_entry_points("pennylane.plugins")}
 
@@ -45,15 +50,15 @@ params2 = [3.4, 5.6]
 params_amp = [2.5, 0.9, 0.3]
 
 # RydbergHamiltonians to be tested
-H_fixed = rydberg_interaction(coordinates) + rydberg_drive(1, 2, 3, wires=3)
+H_i = rydberg_interaction(coordinates)
 
 HAMILTONIANS_AND_PARAMS = [(H_i + rydberg_drive(1, 2, 3, wires=[0, 1, 2]), []),
-                (H_i + rydberg_drive(amp, 1, 2, wires=[0, 1, 2]), [params_amp]),
-                (H_i + rydberg_drive(2, f1, 2, wires=[0, 1, 2]), [params1]),
-                (H_i + rydberg_drive(amp, 1, f2, wires=[0, 1, 2]), [params_amp, params2]),
-                (H_i + rydberg_drive(4, f2, f1, wires=[0, 1, 2]), [params2, params1]),
-                (H_i + rydberg_drive(amp, f2, 4, wires=[0, 1, 2]), [params_amp, params2]),
-                (H_i + rydberg_drive(amp, f2, f1, wires=[0, 1, 2]), [params_amp, params2, params1])
+                           (H_i + rydberg_drive(amp, 1, 2, wires=[0, 1, 2]), [params_amp]),
+                           (H_i + rydberg_drive(2, f1, 2, wires=[0, 1, 2]), [params1]),
+                           (H_i + rydberg_drive(amp, 1, f2, wires=[0, 1, 2]), [params_amp, params2]),
+                           (H_i + rydberg_drive(4, f2, f1, wires=[0, 1, 2]), [params2, params1]),
+                           (H_i + rydberg_drive(amp, f2, 4, wires=[0, 1, 2]), [params_amp, params2]),
+                           (H_i + rydberg_drive(amp, f2, f1, wires=[0, 1, 2]), [params_amp, params2, params1])
                 ]
 
 
@@ -64,17 +69,20 @@ class TestBraketAquilaDevice:
     def test_hardware_capabilities(self):
         """Test hardware capabilities can be retrieved"""
 
-        assert isinstance(dev_hw.hardware_capabilities, dict)
-        assert 'rydberg' in dev_hw.hardware_capabilities.keys()
-        assert 'lattice' in dev_hw.hardware_capabilities.keys()
+        dev = BraketAquilaDevice(wires=3)
+
+        assert isinstance(dev.hardware_capabilities, dict)
+        assert 'rydberg' in dev.hardware_capabilities.keys()
+        assert 'lattice' in dev.hardware_capabilities.keys()
 
     def test_validate_operations_multiple_drive_terms(self):
         """Test that an error is raised if there are multiple drive terms on
         the Hamiltonian"""
+        dev = BraketAquilaDevice(wires=3)
         pulses = [RydbergPulse(3, 4, 5, [0, 1]), RydbergPulse(4, 6, 7, [1, 2])]
 
         with pytest.raises(NotImplementedError, match="Multiple pulses in a Rydberg Hamiltonian are not currently supported"):
-            dev_hw._validate_pulses(pulses)
+            dev._validate_pulses(pulses)
 
     @pytest.mark.parametrize("pulse_wires, dev_wires, res", [([0, 1, 2], [0, 1, 2, 3], 'error'),
                                                              ([5, 6, 7, 8, 9], [4, 5, 6, 7, 8], 'error'),
@@ -96,44 +104,24 @@ class TestBraketAquilaDevice:
 class TestDeviceIntegration:
     """Test the devices work correctly from the PennyLane frontend."""
 
-    @pytest.mark.parametrize("shortname, backend_name", shortname_and_backends)
-    def test_load_device(self, name, backend_name):
+    @pytest.mark.parametrize("shortname, backend_name", shortname_and_backendname)
+    def test_load_device(self, shortname, backend_name):
         """Test that the device loads correctly"""
-        dev = TestDeviceIntegration._device(name, wires=2)
+        dev = TestDeviceIntegration._device(shortname, wires=2)
         assert dev.num_wires == 2
         assert dev.shots is 100
-        assert dev.short_name == name
+        assert dev.short_name == shortname
         assert dev._device.name == backend_name
 
     def test_args_aqulia(self):
         """Test that BraketAwsDevice requires correct arguments"""
-        with pytest.raises(TypeError, match="missing 1 required positional arguments"):
+        with pytest.raises(TypeError, match="missing 1 required positional argument"):
             qml.device("braket.aws.aquila")
 
     def test_args_local(self):
         """Test that BraketLocalDevice requires correct arguments"""
         with pytest.raises(TypeError, match="missing 1 required positional argument"):
             qml.device("braket.local.aquila")
-
-    @pytest.mark.parametrize("shortname", ["braket.local.aquila", "braket.aws.aquila"])
-    @pytest.mark.parametrize("shots", [4, 8192])
-    def test_one_qubit_circuit(self, shots, shortname, tol):
-        """Test that devices provide correct result for a simple circuit"""
-        dev = TestDeviceIntegration._device(shortname, wires=1, shots=shots)
-
-        @qml.qnode(dev)
-        def circuit():
-            """Reference QNode"""
-            qml.evolve(H_fixed)([], t)
-            return qml.sample()
-
-        assert np.allclose(circuit(params), np.cos(a) * np.sin(b), **tol)
-
-    # @staticmethod
-    # def _device(shortname_and_backend, wires, extra_kwargs):
-    #     device_name, backend = shortname_and_backend
-    #     device_class = ENTRY_POINTS[device_name].load()
-    #     return qml.device(device_name, wires=wires, **extra_kwargs(device_class, backend))
 
     @staticmethod
     def _device(shortname, wires, shots=100):
@@ -162,39 +150,22 @@ class TestDeviceAttributes:
         assert len(res) == shots
 
 
+dev = qml.device('braket.local.aquila', wires=3)
+
+
 class TestQnodeIntegration:
-    pass
-#     def test_no_callables(self, H, params):
-#         """Test basis state initialization"""
-#         dev = device(4)
-#         t = 1.13
-#
-#         @qml.qnode(dev)
-#         def circuit():
-#             qml.evolve(H)(params, t)
-#             return qml.sample()
-#
-#         expected = np.zeros([2**4])
-#         expected[np.ravel_multi_index(state, [2] * 4)] = 1
-#         assert np.allclose(circuit(), expected, **tol)
-#
-#     def test_callable_amp(self, init_state, device, tol):
-#         pass
-#
-#     def test_callable_phase(self):
-#         pass
-#
-#     def test_callable_detuning(self):
-#         pass
-#
-#     def test_callable_amp_and_phase(self):
-#         pass
-#
-#     def test_callable_amp_and_detuning(self):
-#         pass
-#
-#     def test_callable_phase_and_detuning(self):
-#         pass
-#
-#     def test_callable_amp_phase_and_detuning(self):
-#         pass
+
+    @pytest.mark.parametrize("H, params", HAMILTONIANS_AND_PARAMS)
+    def test_circuit_can_be_called(self, H, params):
+        """Test that the circuit consisting of a ParametrizedEvolution with a single, global pulse
+        runs successfully for all combinations of amplitude, phase and detuning being constants or callables"""
+
+        t = 1.13
+
+        @qml.qnode(dev)
+        def circuit():
+            qml.evolve(H)(params, t)
+            return qml.sample()
+
+        circuit()
+
