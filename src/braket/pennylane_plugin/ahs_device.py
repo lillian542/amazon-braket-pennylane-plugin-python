@@ -389,6 +389,7 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
                 pattern = [det / _max for det in time_slice]
                 break
 
+        # If all time steps are zero, local detuning is assumed to be zero
         if pattern == []:
             max_detuning = 0
             pattern = [1.0] * len(detunings)
