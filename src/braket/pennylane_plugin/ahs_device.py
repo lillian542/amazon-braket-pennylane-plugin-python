@@ -38,7 +38,7 @@ class BraketAhsDevice(QubitDevice):
             shots=100):
 
         if not shots:
-            raise RuntimeError(f"This device requires shots. Recieved shots={shots}")
+            raise RuntimeError(f"This device requires shots. Received shots={shots}")
         self._device = device
         super().__init__(wires=wires, shots=shots)
 
@@ -142,7 +142,7 @@ class BraketAhsDevice(QubitDevice):
 
     def _evaluate_pulses(self, ev_op):
         """Feeds in the parameters in order to partially evaluate the callables (amplitude, phase and/or detuning)
-        describing the pulses, so they are only a function of time. Saves the on the device as `dev.pulses`.
+        describing the pulses, so they are only a function of time. Saves the pulses on the device as `dev.pulses`.
 
         Args:
             ev_op(ParametrizedEvolution): the operator containing the pulses to be evaluated
@@ -274,7 +274,7 @@ class BraketAhsDevice(QubitDevice):
 
 
 class BraketAquilaDevice(BraketAhsDevice):
-    """Amazon Braket AHS device for QuEra Aquila hardware for PennyLane.
+    """Amazon Braket AHS device on QuEra Aquila hardware for PennyLane.
 
     Args:
         wires (int or Iterable[Number, str]]): Number of subsystems represented by the device,
