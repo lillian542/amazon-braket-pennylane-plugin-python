@@ -478,8 +478,8 @@ class TestLocalAquilaDevice:
         with pytest.raises(NotImplementedError, match="Multiple pulses in a Rydberg Hamiltonian are not currently supported"):
             dev_sim._validate_pulses(pulses)
 
-    @pytest.mark.parametrize("pulse_wires, dev_wires, res", [([0, 1, 2], [0, 1, 2, 3], 'error'), # subset
-                                                             ([5, 6, 7, 8, 9], [4, 5, 6, 7, 8], 'error'), # mismatch
+    @pytest.mark.parametrize("pulse_wires, dev_wires, res", [([0, 1, 2], [0, 1, 2, 3], 'error'),  # subset
+                                                             ([5, 6, 7, 8, 9], [4, 5, 6, 7, 8], 'error'),  # mismatch
                                                              ([0, 1, 2, 3, 6], [1, 2, 3], 'error'),
                                                              ([0, 1, 2], [0, 1, 2], 'success')])
     def test_validate_pulse_is_global_drive(self, pulse_wires, dev_wires, res):

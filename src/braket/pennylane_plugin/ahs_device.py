@@ -1,5 +1,6 @@
 from functools import partial
 from typing import Iterable, Union
+from abc import ABC
 import numpy as np
 
 from braket.aws import AwsDevice
@@ -14,7 +15,7 @@ from pennylane._version import __version__
 from pennylane.pulse.rydberg_hamiltonian import RydbergHamiltonian, RydbergPulse
 
 
-class BraketAhsDevice(QubitDevice):
+class BraketAhsDevice(QubitDevice, ABC):
     """Abstract Amazon Braket device for analogue hamiltonian simulation with PennyLane.
 
     Args:
@@ -72,11 +73,16 @@ class BraketAhsDevice(QubitDevice):
 
         self.samples = task.result()
 
+    @abstractmethod
     def _run_task(self, ahs_program):
         raise NotImplementedError("Running a task not implemented for the base class")
 
     def create_ahs_program(self, evolution):
         """Create AHS program for upload to hardware from a ParametrizedEvolution
+
+        Args:
+            evolution (ParametrizedEvolution): the PennyLane operator describing the pulse
+                to be converted into an Analogue Hamiltonian Simulation program
 
         Returns:
             AnalogHamiltonianSimulation: a program containing the register and drive
@@ -131,10 +137,31 @@ class BraketAhsDevice(QubitDevice):
                                f'({len(self.wires)})')
 
     def _validate_pulses(self, pulses):
-        raise NotImplementedError("Validation of pulses not implemented in the base class")
+        """Confirms that the list of RydbergPulses describes a single, global pulse
+
+        Args:
+            pulses: List of RydbergPulses
+
+        Raises:
+            RuntimeError, NotImplementedError"""
+
+        if not pulses:
+            raise RuntimeError("No pulses found in the ParametrizedEvolution")
+
+        if len(pulses) > 1:
+            raise NotImplementedError(
+                f"Multiple pulses in a Rydberg Hamiltonian are not currently supported on "
+                f"hardware. Recieved {len(pulses)} pulses.")
+
+        if pulses[0].wires != self.wires:
+            raise NotImplementedError(
+                f"Only global drive is currently supported. Found drive defined for subset "
+                f"{[pulses[0].wires]} of all wires [{self.wires}]")
+
 
     def _create_register(self, coordinates):
-        """Create an AtomArrangement to describe the atom layout from the coordinates in the ParametrizedEvolution"""
+        """Create an AtomArrangement to describe the atom layout from the coordinates in the
+        ParametrizedEvolution, and saves it as self.register"""
 
         register = AtomArrangement()
         for [x, y] in coordinates:
@@ -315,21 +342,6 @@ class BraketAquilaDevice(BraketAhsDevice):
                                 shots=self.shots)
         return task
 
-    def _validate_pulses(self, pulses):
-
-        if not pulses:
-            raise RuntimeError("No pulses found in the ParametrizedEvolution")
-
-        if len(pulses) > 1:
-            raise NotImplementedError(
-                f"Multiple pulses in a Rydberg Hamiltonian are not currently supported on "
-                f"hardware. Recieved {len(pulses)} pulses.")
-
-        if pulses[0].wires != self.wires:
-            raise NotImplementedError(
-                f"Only global drive is currently supported on hardware. Found drive defined for subset "
-                f"{[pulses[0].wires]} of all wires [{self.wires}]")
-
 
 class BraketLocalAquilaDevice(BraketAhsDevice):
     """Amazon Braket LocalSimulator AHS device for PennyLane.
@@ -358,18 +370,3 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
                                 shots=self.shots,
                                 steps=100)
         return task
-
-    def _validate_pulses(self, pulses):
-
-        if not pulses:
-            raise RuntimeError("No pulses found in the ParametrizedEvolution")
-
-        if len(pulses) > 1:
-            raise NotImplementedError(
-                f"Multiple pulses in a Rydberg Hamiltonian are not currently supported. "
-                f"Recieved {len(pulses)} pulses.")
-
-        if pulses[0].wires != self.wires:
-            raise NotImplementedError(
-                f"Only global drive is currently supported. Found drive defined for subset "
-                f"{[pulses[0].wires]} of all wires [{self.wires}]")
