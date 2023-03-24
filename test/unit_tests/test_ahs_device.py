@@ -12,7 +12,7 @@ from braket.tasks.analog_hamiltonian_simulation_quantum_task_result import ShotR
 import pennylane as qml
 import numpy as np
 from pennylane.pulse.rydberg_hamiltonian import RydbergHamiltonian, RydbergPulse, rydberg_drive, rydberg_interaction
-from jax import numpy as jnp
+#from jax import numpy as jnp
 from dataclasses import dataclass
 from functools import partial
 
@@ -34,7 +34,7 @@ def f2(p, t):
 
 # realistic amplitude function (0 at start and end for hardware)
 def amp(p, t):
-    f = p[0] * jnp.exp(-(t-p[1])**2/(2*p[2]**2))
+    f = p[0] * np.exp(-(t-p[1])**2/(2*p[2]**2))
     return qml.pulse.rect(f, windows=[0.1, 1.7])(p, t)
 
 
