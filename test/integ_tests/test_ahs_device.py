@@ -19,6 +19,7 @@ import pkg_resources
 import pytest
 from conftest import shortname_and_backends
 
+from pennylane.pulse.parametrized_evolution import ParametrizedEvolution
 from pennylane.pulse.rydberg_hamiltonian import rydberg_drive, rydberg_interaction, RydbergPulse
 
 from braket.pennylane_plugin.ahs_device import BraketAquilaDevice, BraketLocalAquilaDevice
@@ -137,7 +138,7 @@ class TestDeviceAttributes:
         assert dev.shots == shots
 
         global_drive = rydberg_drive(2, 1, 2, wires=[0, 1, 2])
-        ts = jnp.array([0.0, 1.75])
+        ts = [0.0, 1.75]
 
         @qml.qnode(dev)
         def circuit():
