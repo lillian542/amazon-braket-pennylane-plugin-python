@@ -1,6 +1,31 @@
+"""
+Devices
+=======
+
+**Module name:** :mod:`braket.pennylane_braket.ahs_device`
+
+.. currentmodule:: braket.pennylane_braket.ahs_device
+
+Braket Analogue Hamiltonian Simulation (AHS) devices to be used with PennyLane
+
+Classes
+-------
+
+.. autosummary::
+   BraketAquilaDevice
+   BraketLocalAquilaDevice
+
+Code details
+~~~~~~~~~~~~
+"""
+
 from functools import partial
 from typing import Iterable, Union
 import numpy as np
+
+from pennylane import QubitDevice
+from pennylane._version import __version__
+from pennylane.pulse.rydberg_hamiltonian import RydbergHamiltonian, RydbergPulse
 
 from braket.aws import AwsDevice
 from braket.devices import Device, LocalSimulator
@@ -8,10 +33,6 @@ from braket.ahs.atom_arrangement import AtomArrangement
 from braket.ahs.analog_hamiltonian_simulation import AnalogHamiltonianSimulation
 from braket.ahs.driving_field import DrivingField
 from braket.timings.time_series import TimeSeries
-
-from pennylane import QubitDevice
-from pennylane._version import __version__
-from pennylane.pulse.rydberg_hamiltonian import RydbergHamiltonian, RydbergPulse
 
 
 class BraketAhsDevice(QubitDevice):
@@ -40,11 +61,26 @@ class BraketAhsDevice(QubitDevice):
         super().__init__(wires=wires, shots=shots)
 
         self.register = None
+        self.pulses = None
         self.ahs_program = None
         self.samples = None
 
     @property
     def settings(self):
+        """Dictionary of constants set by the hardware.
+
+        Used to enable initializing hardware-consistent Hamiltonians by saving
+        all the values that would need to be passed, i.e. :
+
+        >>> dev_remote = qml.device('braket.aws.aquila', wires=3)
+        >>> dev_pl = qml.device('default.qubit', wires=3)
+        >>> settings = dev_remote.settings
+        >>> H_int = rydberg_interaction(coordinates, **settings)
+
+        If `H_int` is included in a hamiltonian used on the PennyLane `default.qubit` device,
+        it will use the harware-specific constants.
+
+        """
         return {"interaction_coeff": 862690}  # MHz x um^6
 
     def apply(self, operations, **kwargs):
@@ -125,8 +161,9 @@ class BraketAhsDevice(QubitDevice):
 
         if not set(ev_op.wires) == set(self.wires):
             raise RuntimeError(
-                f"Device contains wires {self.wires}, but received a `ParametrizedEvolution` operator "
-                f"working on wires {ev_op.wires}. Device wires must match wires of the evolution."
+                f"Device contains wires {self.wires}, but received a `ParametrizedEvolution` "
+                f"operator working on wires {ev_op.wires}. Device wires must match wires of "
+                f"the evolution."
             )
 
         if len(ev_op.H.register) != len(self.wires):
@@ -172,8 +209,9 @@ class BraketAhsDevice(QubitDevice):
         self.register = register
 
     def _evaluate_pulses(self, ev_op):
-        """Feeds in the parameters in order to partially evaluate the callables (amplitude, phase and/or detuning)
-        describing the pulses, so they are only a function of time. Saves the pulses on the device as `dev.pulses`.
+        """Feeds in the parameters in order to partially evaluate the callables (amplitude,
+        phase and/or detuning) describing the pulses, so they are only a function of time.
+        Saves the pulses on the device as `dev.pulses`.
 
         Args:
             ev_op(ParametrizedEvolution): the operator containing the pulses to be evaluated
@@ -230,12 +268,12 @@ class BraketAhsDevice(QubitDevice):
         """Converts pulse information into a TimeSeries
 
         Args:
-            pulse_parameter(Union[float, Callable]): a physical parameter (pulse, amplitude or detuning) of the
-                pulse. If this is a callalbe, it has already been partially evaluated, such that it is only a
-                function of time.
-            time_points(array): the times where parameters will be set in the TimeSeries, specified in seconds
-            scaling_factor(float): A multiplication factor for the pulse_parameter where relevant to convert
-                between units. Defaults to 1.
+            pulse_parameter(Union[float, Callable]): a physical parameter (pulse, amplitude
+                or detuning) of the pulse. If this is a callalbe, it has already been partially
+                evaluated, such that it is only a function of time.
+            time_points(array): the times where parameters will be set in the TimeSeries, specified
+                in seconds scaling_factor(float): A multiplication factor for the pulse_parameter
+                where relevant to convert between units. Defaults to 1.
 
         Returns:
             TimeSeries: a description of setpoints and corresponding times
@@ -244,7 +282,7 @@ class BraketAhsDevice(QubitDevice):
         ts = TimeSeries()
 
         if callable(pulse_parameter):
-            # convert time to microseconds to evaluate values - this is the expected unit for the PL functions
+            # convert time to microseconds to evaluate (expected unit for the PL functions)
             vals = [float(pulse_parameter(t * 1e6)) * scaling_factor for t in time_points]
         else:
             vals = [pulse_parameter for t in time_points]
@@ -255,20 +293,22 @@ class BraketAhsDevice(QubitDevice):
         return ts
 
     def _convert_pulse_to_driving_field(self, pulse, time_interval):
-        """Converts a ``RydbergPulse`` from PennyLane describing a global drive to a ``DrivingField``
-        from Braket AHS
+        """Converts a ``RydbergPulse`` from PennyLane describing a global drive to a
+        ``DrivingField`` from Braket AHS
 
         Args:
-            pulse[RydbergPulse]: a dataclass object containing amplitude, phase and detuning information
+            pulse[RydbergPulse]: a dataclass object containing amplitude, phase and detuning
+                information
             time_interval(array[Number, Number]]): The start and end time for the applied pulse
 
         Returns:
-            DrivingField: the object representing the global drive for the AnalogueHamiltonianSimulation object
+            DrivingField: the object representing the global drive for the
+                AnalogueHamiltonianSimulation object
         """
 
         time_points = self._get_sample_times(time_interval)
 
-        # scaling factor for amplitude and detunig convert MHz (expected PL input) to rad/s (upload units)
+        # scaling factor for amp and detuning converts MHz (PL input) to rad/s (upload units)
         amplitude = self._convert_to_time_series(
             pulse.amplitude, time_points, scaling_factor=2 * np.pi * 1e6
         )
@@ -283,16 +323,17 @@ class BraketAhsDevice(QubitDevice):
 
     @staticmethod
     def _result_to_sample_output(res):
-        """This function converts a single shot of the QuEra measurement results to 0 (ground), 1 (excited)
-        and NaN (failed to measure) for all atoms in the result.
+        """This function converts a single shot of the QuEra measurement results to
+        0 (ground), 1 (excited) and NaN (failed to measure) for all atoms in the result.
 
         The QuEra results are summarized via 3 values: status, pre_sequence, and post_sequence.
 
-        Status is success or fail. The pre_sequence is 1 if an atom in the ground state was successfully
-        initialized, and 0 otherwise. The post_sequence is 1 if an atom in the ground state was measured,
-        and 0 otherwise. Comparison of pre_sequence and post_sequence reveals one of 3 possible outcomes:
+        Status is success or fail. The pre_sequence is 1 if an atom in the ground state was
+        successfully initialized, and 0 otherwise. The post_sequence is 1 if an atom in the
+        ground state was measured, and 0 otherwise. Comparison of pre_sequence and post_sequence
+        reveals one of 3 possible outcomes:
 
-        0 --> 0: Atom failed to be placed, no measurement (no atom in the ground state either before or after)
+        0 --> 0: Atom failed to be placed (no atom detected in the ground state either before or after)
         1 --> 0: Atom initialized, measured in Rydberg state (atom in ground state detected before, but not after)
         1 --> 1: Atom initialized, measured in ground state (atom in ground state detected both before and after)
         """
