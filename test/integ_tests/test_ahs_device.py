@@ -20,17 +20,19 @@ import pytest
 from conftest import shortname_and_backends
 
 from pennylane.pulse.parametrized_evolution import ParametrizedEvolution
-from pennylane.pulse.rydberg_hamiltonian import rydberg_drive, rydberg_interaction, RydbergPulse
+from pennylane.pulse.rydberg import rydberg_interaction
+from pennylane.pulse.hardware_hamiltonian import HardwarePulse, drive
 
 from braket.pennylane_plugin.ahs_device import BraketAquilaDevice, BraketLocalAquilaDevice
 
-ENTRY_POINTS = {entry.name: entry for entry in pkg_resources.iter_entry_points("pennylane.plugins")}
+# ENTRY_POINTS = {entry.name: entry for entry in pkg_resources.iter_entry_points("pennylane.plugins")}
 
 shortname_and_backendname = [("braket.local.aquila", "RydbergAtomSimulator"),
                              ("braket.aws.aquila", "Aquila")]
 
 # =========================================================
 coordinates = [[0, 0], [0, 5], [5, 0]]  # in micrometers
+
 
 def f1(p, t):
     return p * np.sin(t) * (t - 1)
@@ -40,7 +42,6 @@ def f2(p, t):
     return p[0] * np.cos(p[1] * t**2)
 
 
-# realistic amplitude function (0 at start and end for hardware)
 def amp(p, t):
     return p[0] * np.exp(-(t-p[1])**2/(2*p[2]**2))
 
@@ -49,16 +50,16 @@ params1 = 1.2
 params2 = [3.4, 5.6]
 params_amp = [2.5, 0.9, 0.3]
 
-# RydbergHamiltonians to be tested
+# Hamiltonians to be tested
 H_i = rydberg_interaction(coordinates)
 
-HAMILTONIANS_AND_PARAMS = [(H_i + rydberg_drive(1, 2, 3, wires=[0, 1, 2]), []),
-                           (H_i + rydberg_drive(amp, 1, 2, wires=[0, 1, 2]), [params_amp]),
-                           (H_i + rydberg_drive(2, f1, 2, wires=[0, 1, 2]), [params1]),
-                           (H_i + rydberg_drive(amp, 1, f2, wires=[0, 1, 2]), [params_amp, params2]),
-                           (H_i + rydberg_drive(4, f2, f1, wires=[0, 1, 2]), [params2, params1]),
-                           (H_i + rydberg_drive(amp, f2, 4, wires=[0, 1, 2]), [params_amp, params2]),
-                           (H_i + rydberg_drive(amp, f2, f1, wires=[0, 1, 2]), [params_amp, params2, params1])
+HAMILTONIANS_AND_PARAMS = [(H_i + drive(1, 2, 3, wires=[0, 1, 2]), []),
+                           (H_i + drive(amp, 1, 2, wires=[0, 1, 2]), [params_amp]),
+                           (H_i + drive(2, f1, 2, wires=[0, 1, 2]), [params1]),
+                           (H_i + drive(amp, 1, f2, wires=[0, 1, 2]), [params_amp, params2]),
+                           (H_i + drive(4, f2, f1, wires=[0, 1, 2]), [params2, params1]),
+                           (H_i + drive(amp, f2, 4, wires=[0, 1, 2]), [params_amp, params2]),
+                           (H_i + drive(amp, f2, f1, wires=[0, 1, 2]), [params_amp, params2, params1])
                 ]
 
 
@@ -79,9 +80,9 @@ class TestBraketAquilaDevice:
         """Test that an error is raised if there are multiple drive terms on
         the Hamiltonian"""
         dev = BraketAquilaDevice(wires=3)
-        pulses = [RydbergPulse(3, 4, 5, [0, 1]), RydbergPulse(4, 6, 7, [1, 2])]
+        pulses = [HardwarePulse(3, 4, 5, [0, 1]), HardwarePulse(4, 6, 7, [1, 2])]
 
-        with pytest.raises(NotImplementedError, match="Multiple pulses in a Rydberg Hamiltonian are not currently supported"):
+        with pytest.raises(NotImplementedError, match="Multiple pulses in a Hamiltonian are not currently supported"):
             dev._validate_pulses(pulses)
 
     @pytest.mark.parametrize("pulse_wires, dev_wires, res", [([0, 1, 2], [0, 1, 2, 3], 'error'),
@@ -92,7 +93,7 @@ class TestBraketAquilaDevice:
         """Test that an error is raised if the pulse does not describe a global drive"""
 
         dev = BraketAquilaDevice(wires=dev_wires)
-        pulse = RydbergPulse(3, 4, 5, pulse_wires)
+        pulse = HardwarePulse(3, 4, 5, pulse_wires)
 
         if res == 'error':
             with pytest.raises(NotImplementedError, match="Only global drive is currently supported"):
@@ -137,7 +138,7 @@ class TestDeviceAttributes:
         dev = BraketLocalAquilaDevice(wires=3, shots=shots)
         assert dev.shots == shots
 
-        global_drive = rydberg_drive(2, 1, 2, wires=[0, 1, 2])
+        global_drive = drive(2, 1, 2, wires=[0, 1, 2])
         ts = [0.0, 1.75]
 
         @qml.qnode(dev)
