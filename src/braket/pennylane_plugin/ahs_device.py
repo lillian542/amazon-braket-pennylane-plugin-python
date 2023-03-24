@@ -25,7 +25,7 @@ import numpy as np
 
 from pennylane import QubitDevice
 from pennylane._version import __version__
-from pennylane.pulse.rydberg_hamiltonian import RydbergHamiltonian, RydbergPulse
+from pennylane.pulse.hardware_hamiltonian import HardwarePulse, HardwareHamiltonian
 
 from braket.aws import AwsDevice
 from braket.devices import Device, LocalSimulator
@@ -174,10 +174,10 @@ class BraketAhsDevice(QubitDevice):
             )
 
     def _validate_pulses(self, pulses):
-        """Confirms that the list of RydbergPulses describes a single, global pulse
+        """Confirms that the list of HardwarePulses describes a single, global pulse
 
         Args:
-            pulses: List of RydbergPulses
+            pulses: List of HardwarePulses
 
         Raises:
             RuntimeError, NotImplementedError"""
@@ -187,8 +187,8 @@ class BraketAhsDevice(QubitDevice):
 
         if len(pulses) > 1:
             raise NotImplementedError(
-                f"Multiple pulses in a Rydberg Hamiltonian are not currently supported on "
-                f"hardware. Recieved {len(pulses)} pulses."
+                f"Multiple pulses in a Hamiltonian are not currently supported. "
+                f"Recieved {len(pulses)} pulses."
             )
 
         if pulses[0].wires != self.wires:
