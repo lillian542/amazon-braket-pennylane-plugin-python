@@ -20,7 +20,7 @@ from functools import partial
 coordinates1 = [[0, 0], [0, 5], [5, 0], [10, 5], [5, 10], [10, 10]]
 wires1 = [1, 6, 0, 2, 4, 3]
 
-coordinates2 = [[0, 0], [5.5, 0.0], [2.75, 4.763139720814412]]
+coordinates2 = [[0, 0], [5.5, 0.0], [2.75, 4.763139720814412]] #in µm
 H_i = rydberg_interaction(coordinates2)
 
 
