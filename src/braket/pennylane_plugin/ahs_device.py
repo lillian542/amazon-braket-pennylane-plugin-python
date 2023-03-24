@@ -1,6 +1,5 @@
 from functools import partial
 from typing import Iterable, Union
-from abc import ABC
 import numpy as np
 
 from braket.aws import AwsDevice
@@ -15,7 +14,7 @@ from pennylane._version import __version__
 from pennylane.pulse.rydberg_hamiltonian import RydbergHamiltonian, RydbergPulse
 
 
-class BraketAhsDevice(QubitDevice, ABC):
+class BraketAhsDevice(QubitDevice):
     """Abstract Amazon Braket device for analogue hamiltonian simulation with PennyLane.
 
     Args:
@@ -42,7 +41,7 @@ class BraketAhsDevice(QubitDevice, ABC):
 
         if not shots:
             raise RuntimeError(f"This device requires shots. Recieved shots={shots}")
-        self._device = backend
+        self._device = device
 
         super().__init__(wires=wires, shots=shots)
 
@@ -73,7 +72,6 @@ class BraketAhsDevice(QubitDevice, ABC):
 
         self.samples = task.result()
 
-    @abstractmethod
     def _run_task(self, ahs_program):
         raise NotImplementedError("Running a task not implemented for the base class")
 
@@ -325,8 +323,8 @@ class BraketAquilaDevice(BraketAhsDevice):
             *,
             shots=100):
 
-        backend = AwsDevice(self.ARN_NR)
-        super().__init__(wires=wires, backend=backend, shots=shots)
+        device = AwsDevice(self.ARN_NR)
+        super().__init__(wires=wires, device=device, shots=shots)
 
         self.ahs_program = None
         self.samples = None
