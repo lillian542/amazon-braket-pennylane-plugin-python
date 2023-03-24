@@ -32,7 +32,7 @@ Code details
 ~~~~~~~~~~~~
 """
 from functools import partial
-from typing import Iterable, Union
+from typing import Iterable, Union, Optional
 import numpy as np
 
 from pennylane import QubitDevice
