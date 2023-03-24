@@ -444,7 +444,7 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
             self,
             wires: Union[int, Iterable],
             *,
-            shots=100
+            shots: int = 100
     ):
         device = LocalSimulator("braket_ahs")
         super().__init__(wires=wires, device=device, shots=shots)

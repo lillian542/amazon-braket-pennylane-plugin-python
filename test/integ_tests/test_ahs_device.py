@@ -25,8 +25,6 @@ from pennylane.pulse.hardware_hamiltonian import HardwarePulse, drive
 
 from braket.pennylane_plugin.ahs_device import BraketAquilaDevice, BraketLocalAquilaDevice
 
-# ENTRY_POINTS = {entry.name: entry for entry in pkg_resources.iter_entry_points("pennylane.plugins")}
-
 shortname_and_backendname = [("braket.local.aquila", "RydbergAtomSimulator"),
                              ("braket.aws.aquila", "Aquila")]
 
