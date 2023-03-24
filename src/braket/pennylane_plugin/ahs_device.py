@@ -31,7 +31,6 @@ Classes
 Code details
 ~~~~~~~~~~~~
 """
-
 from functools import partial
 from typing import Iterable, Union
 import numpy as np
@@ -40,12 +39,13 @@ from pennylane import QubitDevice
 from pennylane._version import __version__
 from pennylane.pulse.hardware_hamiltonian import HardwarePulse, HardwareHamiltonian
 
-from braket.aws import AwsDevice
+from braket.aws import AwsDevice, AwsSession, AwsQuantumTask
 from braket.devices import Device, LocalSimulator
 from braket.ahs.atom_arrangement import AtomArrangement
 from braket.ahs.analog_hamiltonian_simulation import AnalogHamiltonianSimulation
 from braket.ahs.driving_field import DrivingField
 from braket.timings.time_series import TimeSeries
+
 
 
 class BraketAhsDevice(QubitDevice):
@@ -66,7 +66,12 @@ class BraketAhsDevice(QubitDevice):
 
     operations = {"ParametrizedEvolution"}
 
-    def __init__(self, wires: Union[int, Iterable], device: Device, *, shots=100):
+    def __init__(
+            self,
+            wires: Union[int, Iterable],
+            device: Device, *,
+            shots: int = 100
+    ):
         if not shots:
             raise RuntimeError(f"This device requires shots. Recieved shots={shots}")
         self._device = device
@@ -367,7 +372,15 @@ class BraketAquilaDevice(BraketAhsDevice):
         wires (int or Iterable[Number, str]]): Number of subsystems represented by the device,
             or iterable that contains unique labels for the subsystems as numbers
             (i.e., ``[-1, 0, 2]``) or strings (``['ancilla', 'q1', 'q2']``).
+        s3_destination_folder (AwsSession.S3DestinationFolder): Name of the S3 bucket
+            and folder, specified as a tuple.
         shots (int): Number of executions to run to aquire measurements. Defaults to 100.
+        aws_session (Optional[AwsSession]): An AwsSession object created to manage
+            interactions with AWS services, to be supplied if extra control
+            is desired. Default: None
+        poll_timeout_seconds (float): Total time in seconds to wait for
+            results before timing out.
+        poll_interval_seconds (float): The polling interval for results in seconds.
 
     """
 
@@ -376,12 +389,26 @@ class BraketAquilaDevice(BraketAhsDevice):
 
     ARN_NR = "arn:aws:braket:us-east-1::device/qpu/quera/Aquila"
 
-    def __init__(self, wires: Union[int, Iterable], *, shots=100):
-        device = AwsDevice(self.ARN_NR)
+    def __init__(
+            self,
+            wires: Union[int, Iterable],
+            s3_destination_folder: AwsSession.S3DestinationFolder = None,
+            *,
+            shots: int = 100,
+            poll_timeout_seconds: float = AwsQuantumTask.DEFAULT_RESULTS_POLL_TIMEOUT,
+            poll_interval_seconds : float = AwsQuantumTask.DEFAULT_RESULTS_POLL_INTERVAL,
+            aws_session: Optional[AwsSession] = None,
+    ):
+        device = AwsDevice(self.ARN_NR, aws_session=aws_session)
+        user_agent = f"BraketPennylanePlugin/{__version__}"
+        device.aws_session.add_braket_user_agent(user_agent)
+        
         super().__init__(wires=wires, device=device, shots=shots)
 
-        self.ahs_program = None
-        self.samples = None
+        self._s3_folder = s3_destination_folder
+        self._poll_timeout_seconds = poll_timeout_seconds
+        self._poll_interval_seconds = poll_interval_seconds
+
 
     @property
     def hardware_capabilities(self):
@@ -390,7 +417,13 @@ class BraketAquilaDevice(BraketAhsDevice):
 
     def _run_task(self, ahs_program):
         discretized_ahs_program = ahs_program.discretize(self._device)
-        task = self._device.run(discretized_ahs_program, shots=self.shots)
+        task = self._device.run(
+            discretized_ahs_program,
+            s3_destination_folder=self._s3_folder,
+            shots=self.shots,
+            poll_timeout_seconds=self._poll_timeout_seconds,
+            poll_interval_seconds=self._poll_interval_seconds,
+        )
         return task
 
 
@@ -407,7 +440,12 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
     name = "Braket QuEra Aquila PennyLane plugin"
     short_name = "braket.local.aquila"
 
-    def __init__(self, wires: Union[int, Iterable], *, shots=100):
+    def __init__(
+            self,
+            wires: Union[int, Iterable],
+            *,
+            shots=100
+    ):
         device = LocalSimulator("braket_ahs")
         super().__init__(wires=wires, device=device, shots=shots)
 
