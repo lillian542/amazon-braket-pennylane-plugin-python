@@ -18,8 +18,8 @@ import pennylane as qml
 import pkg_resources
 import pytest
 from conftest import shortname_and_backends
-# from jax import numpy as jnp
 
+from pennylane.pulse.parametrized_evolution import ParametrizedEvolution
 from pennylane.pulse.rydberg_hamiltonian import rydberg_drive, rydberg_interaction, RydbergPulse
 
 from braket.pennylane_plugin.ahs_device import BraketAquilaDevice, BraketLocalAquilaDevice
@@ -41,10 +41,9 @@ def f2(p, t):
     return p[0] * np.cos(p[1] * t**2)
 
 
-# realistic amplitude function (0 at start and end for hardware)
 def amp(p, t):
-    f = p[0] * np.exp(-(t-p[1])**2/(2*p[2]**2))
-    return qml.pulse.rect(f, windows=[0.1, 1.7])(p, t)
+    return p[0] * np.exp(-(t-p[1])**2/(2*p[2]**2))
+
 
 params1 = 1.2
 params2 = [3.4, 5.6]
@@ -139,11 +138,11 @@ class TestDeviceAttributes:
         assert dev.shots == shots
 
         global_drive = rydberg_drive(2, 1, 2, wires=[0, 1, 2])
-        ts = np.array([0.0, 1.75])
+        ts = [0.0, 1.75]
 
         @qml.qnode(dev)
         def circuit():
-            qml.evolve(H_i + global_drive)([], ts)
+            ParametrizedEvolution(H_i + global_drive, [], ts)
             return qml.sample()
 
         res = circuit()
@@ -165,7 +164,7 @@ class TestQnodeIntegration:
 
         @qml.qnode(dev)
         def circuit():
-            qml.evolve(H)(params, t)
+            ParametrizedEvolution(H, params, t)
             return qml.sample()
 
         circuit()
