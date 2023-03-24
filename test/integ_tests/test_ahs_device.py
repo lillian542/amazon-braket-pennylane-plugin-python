@@ -25,7 +25,7 @@ from pennylane.pulse.hardware_hamiltonian import HardwarePulse, drive
 
 from braket.pennylane_plugin.ahs_device import BraketAquilaDevice, BraketLocalAquilaDevice
 
-#ENTRY_POINTS = {entry.name: entry for entry in pkg_resources.iter_entry_points("pennylane.plugins")}
+# ENTRY_POINTS = {entry.name: entry for entry in pkg_resources.iter_entry_points("pennylane.plugins")}
 
 shortname_and_backendname = [("braket.local.aquila", "RydbergAtomSimulator"),
                              ("braket.aws.aquila", "Aquila")]
@@ -82,7 +82,7 @@ class TestBraketAquilaDevice:
         dev = BraketAquilaDevice(wires=3)
         pulses = [HardwarePulse(3, 4, 5, [0, 1]), HardwarePulse(4, 6, 7, [1, 2])]
 
-        with pytest.raises(NotImplementedError, match="Multiple pulses in a Rydberg Hamiltonian are not currently supported"):
+        with pytest.raises(NotImplementedError, match="Multiple pulses in a Hamiltonian are not currently supported"):
             dev._validate_pulses(pulses)
 
     @pytest.mark.parametrize("pulse_wires, dev_wires, res", [([0, 1, 2], [0, 1, 2, 3], 'error'),
@@ -138,7 +138,7 @@ class TestDeviceAttributes:
         dev = BraketLocalAquilaDevice(wires=3, shots=shots)
         assert dev.shots == shots
 
-        global_drive = rydberg_drive(2, 1, 2, wires=[0, 1, 2])
+        global_drive = drive(2, 1, 2, wires=[0, 1, 2])
         ts = [0.0, 1.75]
 
         @qml.qnode(dev)
