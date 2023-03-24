@@ -31,7 +31,6 @@ Classes
 Code details
 ~~~~~~~~~~~~
 """
-from enum import Enum, auto
 from functools import partial
 from typing import Iterable, Union
 import numpy as np
