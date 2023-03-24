@@ -11,31 +11,34 @@
 # ANY KIND, either express or implied. See the License for the specific
 # language governing permissions and limitations under the License.
 
+import pytest
 import warnings
+
+from braket.pennylane_plugin.ahs_device import BraketAquilaDevice, BraketLocalAquilaDevice
+from braket.ahs.analog_hamiltonian_simulation import AnalogHamiltonianSimulation
+from braket.timings.time_series import TimeSeries
+from braket.ahs.driving_field import DrivingField
+from braket.ahs.shifting_field import ShiftingField
+from braket.ahs.pattern import Pattern
+from braket.ahs.atom_arrangement import AtomArrangement
+from braket.tasks.local_quantum_task import LocalQuantumTask
+from braket.tasks.analog_hamiltonian_simulation_quantum_task_result import ShotResult
+
+import pennylane as qml
+import numpy as np
+
+from pennylane.pulse.parametrized_evolution import ParametrizedEvolution
+from pennylane.pulse.rydberg import rydberg_interaction, rydberg_drive
+from pennylane.pulse.hardware_hamiltonian import HardwarePulse, drive
+
 from dataclasses import dataclass
 from functools import partial
 
-import numpy as np
-import pennylane as qml
-import pytest
-from braket.ahs.analog_hamiltonian_simulation import AnalogHamiltonianSimulation
-from braket.ahs.atom_arrangement import AtomArrangement
-from braket.ahs.driving_field import DrivingField
-from braket.ahs.pattern import Pattern
-from braket.ahs.shifting_field import ShiftingField
-from braket.tasks.analog_hamiltonian_simulation_quantum_task_result import ShotResult
-from braket.tasks.local_quantum_task import LocalQuantumTask
-from braket.timings.time_series import TimeSeries
-from pennylane.pulse.hardware_hamiltonian import HardwareHamiltonian, HardwarePulse
-from pennylane.pulse.parametrized_evolution import ParametrizedEvolution
-from pennylane.pulse.rydberg import rydberg_drive, rydberg_interaction
-
-from braket.pennylane_plugin.ahs_device import BraketAhsDevice, BraketLocalAquilaDevice
 
 coordinates1 = [[0, 0], [0, 5], [5, 0], [10, 5], [5, 10], [10, 10]]
 wires1 = [1, 6, 0, 2, 4, 3]
 
-coordinates2 = [[0, 0], [5.5, 0.0], [2.75, 4.763139720814412]]  # in µm
+coordinates2 = [[0, 0], [5.5, 0.0], [2.75, 4.763139720814412]] #in µm
 H_i = rydberg_interaction(coordinates2)
 
 
@@ -48,7 +51,7 @@ def f2(p, t):
 
 
 def amp(p, t):
-    return p[0] * np.exp(-((t - p[1]) ** 2) / (2 * p[2] ** 2))
+    return p[0] * np.exp(-(t-p[1])**2/(2*p[2]**2))
 
 
 # functions of time to use as partially evaluated callable parameters in tests
@@ -65,40 +68,27 @@ def lin_fn(t):
 
 
 def quad_fn(t):
-    return 4.5 * t**2
+    return 4.5 * t ** 2
 
 
 params1 = 1.2
 params2 = [3.4, 5.6]
 params_amp = [2.5, 0.9, 0.3]
 
-HAMILTONIANS_AND_PARAMS = [
-    (H_i + rydberg_drive(amplitude=4, phase=1, detuning=3, wires=[0, 1, 2]), []),
-    (H_i + rydberg_drive(amplitude=amp, phase=1, detuning=2, wires=[0, 1, 2]), [params_amp]),
-    (H_i + rydberg_drive(amplitude=2, phase=f1, detuning=2, wires=[0, 1, 2]), [params1]),
-    (
-        H_i + rydberg_drive(amplitude=amp, phase=1, detuning=f2, wires=[0, 1, 2]),
-        [params_amp, params2],
-    ),
-    (H_i + rydberg_drive(amplitude=4, phase=f2, detuning=f1, wires=[0, 1, 2]), [params2, params1]),
-    (
-        H_i + rydberg_drive(amplitude=amp, phase=f2, detuning=4, wires=[0, 1, 2]),
-        [params_amp, params2],
-    ),
-    (
-        H_i + rydberg_drive(amplitude=amp, phase=f2, detuning=f1, wires=[0, 1, 2]),
-        [params_amp, params2, params1],
-    ),
-]
+HAMILTONIANS_AND_PARAMS = [(H_i + rydberg_drive(amplitude=4, phase=1, detuning=3, wires=[0, 1, 2]), []),
+                (H_i + rydberg_drive(amplitude=amp, phase=1, detuning=2, wires=[0, 1, 2]), [params_amp]),
+                (H_i + rydberg_drive(amplitude=2, phase=f1, detuning=2, wires=[0, 1, 2]), [params1]),
+                (H_i + rydberg_drive(amplitude=amp, phase=1, detuning=f2, wires=[0, 1, 2]), [params_amp, params2]),
+                (H_i + rydberg_drive(amplitude=4, phase=f2, detuning=f1, wires=[0, 1, 2]), [params2, params1]),
+                (H_i + rydberg_drive(amplitude=amp, phase=f2, detuning=4, wires=[0, 1, 2]), [params_amp, params2]),
+                (H_i + rydberg_drive(amplitude=amp, phase=f2, detuning=f1, wires=[0, 1, 2]), [params_amp, params2, params1])
+                ]
 
 
-DEV_ATTRIBUTES = [(BraketLocalAquilaDevice, "RydbergAtomSimulator", "braket.local.aquila")]
+DEV_ATTRIBUTES = [(BraketAquilaDevice, "Aquila", "braket.aws.aquila"),
+                  (BraketLocalAquilaDevice, "RydbergAtomSimulator", "braket.local.aquila")]
 
-
-class MockAhsDevice(BraketAhsDevice):
-    short_name = "braket.mock.device"
-
-
+dev_hw = BraketAquilaDevice(wires=3)
 dev_sim = BraketLocalAquilaDevice(wires=3, shots=17)
 
 
@@ -118,9 +108,12 @@ def dummy_ahs_program():
     # register
     register = AtomArrangement()
     for [x, y] in coordinates2:
-        register.add([x * 1e-6, y * 1e-6])
+        register.add([x*1e-6, y*1e-6])
 
-    ahs_program = AnalogHamiltonianSimulation(hamiltonian=H, register=register)
+    ahs_program = AnalogHamiltonianSimulation(
+        hamiltonian=H,
+        register=register
+    )
 
     return ahs_program
 
@@ -138,28 +131,16 @@ class DummyMeasurementResult:
     post_sequence: np.array
 
 
-DUMMY_RESULTS = [
-    (DummyMeasurementResult(Status("Success"), np.array([1]), np.array([1])), np.array([0])),
-    (DummyMeasurementResult(Status("Success"), np.array([1]), np.array([0])), np.array([1])),
-    (DummyMeasurementResult(Status("Success"), np.array([0]), np.array([0])), np.array([np.NaN])),
-    (DummyMeasurementResult(Status("Failure"), np.array([1]), np.array([1])), np.array([np.NaN])),
-    (
-        DummyMeasurementResult(Status("Success"), np.array([1, 1, 0]), np.array([1, 0, 0])),
-        np.array([0, 1, np.NaN]),
-    ),
-    (
-        DummyMeasurementResult(Status("Success"), np.array([1, 1]), np.array([0, 0])),
-        np.array([1, 1]),
-    ),
-    (
-        DummyMeasurementResult(Status("Success"), np.array([0, 1]), np.array([0, 0])),
-        np.array([np.NaN, 1]),
-    ),
-    (
-        DummyMeasurementResult(Status("Failure"), np.array([1, 1]), np.array([1, 1])),
-        np.array([np.NaN, np.NaN]),
-    ),
-]
+DUMMY_RESULTS = [(DummyMeasurementResult(Status('Success'), np.array([1]), np.array([1])), np.array([0])),
+           (DummyMeasurementResult(Status('Success'), np.array([1]), np.array([0])), np.array([1])),
+           (DummyMeasurementResult(Status('Success'), np.array([0]), np.array([0])), np.array([np.NaN])),
+           (DummyMeasurementResult(Status('Failure'), np.array([1]), np.array([1])), np.array([np.NaN])),
+           (DummyMeasurementResult(Status('Success'), np.array([1, 1, 0]), np.array([1, 0, 0])), np.array([0, 1, np.NaN])),
+           (DummyMeasurementResult(Status('Success'), np.array([1, 1]), np.array([0, 0])), np.array([1, 1])),
+           (DummyMeasurementResult(Status('Success'), np.array([0, 1]), np.array([0, 0])), np.array([np.NaN, 1])),
+           (DummyMeasurementResult(Status('Failure'), np.array([1, 1]), np.array([1, 1])), np.array([np.NaN, np.NaN]))
+           ]
+
 
 
 class TestBraketAhsDevice:
@@ -184,13 +165,14 @@ class TestBraketAhsDevice:
     def test_settings(self):
         dev = dev_sim
         assert isinstance(dev.settings, dict)
-        assert "interaction_coeff" in dev.settings.keys()
+        assert 'interaction_coeff' in dev.settings.keys()
         assert len(dev.settings.keys()) == 1
-        assert dev.settings["interaction_coeff"] == 862690
+        assert dev.settings['interaction_coeff'] == 862690
 
-    @pytest.mark.parametrize(
-        "dev_cls, shots", [(BraketLocalAquilaDevice, 1000), (BraketLocalAquilaDevice, 2)]
-    )
+    @pytest.mark.parametrize("dev_cls, shots", [(BraketAquilaDevice, 1000),
+                                                (BraketAquilaDevice, 2),
+                                                (BraketLocalAquilaDevice, 1000),
+                                                (BraketLocalAquilaDevice, 2)])
     def test_setting_shots(self, dev_cls, shots):
         """Test that setting shots changes number of shots from default (100)"""
         dev = dev_cls(wires=3, shots=shots)
@@ -202,13 +184,10 @@ class TestBraketAhsDevice:
         with pytest.raises(RuntimeError, match="This device requires shots"):
             BraketLocalAquilaDevice(wires=3, shots=shots)
 
-    @pytest.mark.parametrize(
-        "dev_cls, wires",
-        [
-            (BraketLocalAquilaDevice, [0, "a", 7]),
-            (BraketLocalAquilaDevice, 7),
-        ],
-    )
+    @pytest.mark.parametrize("dev_cls, wires", [(BraketAquilaDevice, 2),
+                                                (BraketAquilaDevice, [0, 2, 4]),
+                                                (BraketLocalAquilaDevice, [0, 'a', 7]),
+                                                (BraketLocalAquilaDevice, 7)])
     def test_setting_wires(self, dev_cls, wires):
         """Test setting wires"""
         dev = dev_cls(wires=wires)
@@ -238,7 +217,7 @@ class TestBraketAhsDevice:
 
         assert isinstance(dev.ahs_program, AnalogHamiltonianSimulation)
         assert dev.ahs_program.register == dev.register
-        assert dev.ahs_program.hamiltonian.amplitude.time_series.times()[-1] == t * 1e-6
+        assert dev.ahs_program.hamiltonian.amplitude.time_series.times()[-1] == t*1e-6
 
     def test_apply_unsupported(self):
         """Tests that apply() throws NotImplementedError when it encounters an unknown gate."""
@@ -252,7 +231,7 @@ class TestBraketAhsDevice:
         evolution operator and store it on the device"""
 
         evolution = ParametrizedEvolution(hamiltonian, params, 1.5)
-        dev = MockAhsDevice(3, None)
+        dev = BraketLocalAquilaDevice(wires=3)
 
         assert dev.ahs_program is None
 
@@ -262,12 +241,8 @@ class TestBraketAhsDevice:
         assert isinstance(dev.ahs_program, AnalogHamiltonianSimulation)
 
         # compare evolution and ahs_program registers
-        assert ahs_program.register.coordinate_list(0) == [
-            c[0] * 1e-6 for c in evolution.H.settings.register
-        ]
-        assert ahs_program.register.coordinate_list(1) == [
-            c[1] * 1e-6 for c in evolution.H.settings.register
-        ]
+        assert ahs_program.register.coordinate_list(0) == [c[0] * 1e-6 for c in evolution.H.register]
+        assert ahs_program.register.coordinate_list(1) == [c[1] * 1e-6 for c in evolution.H.register]
 
         # elements of the hamiltonian have the expected shape
         h = ahs_program.hamiltonian
@@ -301,22 +276,20 @@ class TestBraketAhsDevice:
     def test_validate_operations_multiple_operators(self):
         """Test that an error is raised if there are multiple operators"""
 
-        H1 = rydberg_drive(amp, f1, 2, wires=[0, 1, 2])
+        H1 = drive(amp, f1, 2, wires=[0, 1, 2])
         op1 = qml.evolve(H_i + H1)
         op2 = qml.evolve(H_i + H1)
 
-        with pytest.raises(
-            NotImplementedError, match="Support for multiple ParametrizedEvolution operators"
-        ):
+        with pytest.raises(NotImplementedError, match="Support for multiple ParametrizedEvolution operators"):
             dev_sim._validate_operations([op1, op2])
 
     def test_validate_operations_wires_match_device(self):
         """Test that an error is raised if the wires on the Hamiltonian
         don't match the wires on the device."""
-        H = H_i + rydberg_drive(3, 2, 2, wires=[0, 1, 2])
+        H = H_i + drive(3, 2, 2, wires=[0, 1, 2])
 
-        dev1 = BraketLocalAquilaDevice(wires=len(H.wires) - 1)
-        dev2 = BraketLocalAquilaDevice(wires=len(H.wires) + 1)
+        dev1 = BraketLocalAquilaDevice(wires=len(H.wires)-1)
+        dev2 = BraketLocalAquilaDevice(wires=len(H.wires)+1)
 
         with pytest.raises(RuntimeError, match="Device wires must match wires of the evolution."):
             dev1._validate_operations([ParametrizedEvolution(H, [], 1)])
@@ -330,7 +303,7 @@ class TestBraketAhsDevice:
 
         # register has wires [0, 1, 2], drive has wire [3]
         # creating a Hamiltonian like this in PL will raise a warning, but not an error
-        H = H_i + rydberg_drive(3, 2, 2, wires=3)
+        H = H_i + drive(3, 2, 2, wires=3)
 
         # device wires [0, 1, 2, 3] match overall wires, but not length of register
         dev = BraketLocalAquilaDevice(wires=4)
@@ -348,29 +321,12 @@ class TestBraketAhsDevice:
         with pytest.raises(RuntimeError, match="Expected a HardwareHamiltonian instance"):
             dev_sim._validate_operations([op1])
 
-    @pytest.mark.parametrize(
-        "pulses, error, error_message",
-        [
-            ([], RuntimeError, "No pulses found in the ParametrizedEvolution"),
-            (
-                [HardwarePulse(1, 2, 3, [0]), HardwarePulse(4, 5, 6, [1])],
-                NotImplementedError,
-                "Multiple pulses in a Hamiltonian are not currently supported",
-            ),
-            (
-                [HardwarePulse(1, 2, 3, [0])],
-                NotImplementedError,
-                "Only global drive is currently supported",
-            ),
-        ],
-    )
-    def test_validate_pulses_invalid_pulses(self, pulses, error, error_message):
+    def test_validate_pulses_no_pulses(self):
         """Test that _validate_pulses raises an error if there are no pulses saved
         on the Hamiltonian"""
-        dev = MockAhsDevice(3, None)
 
-        with pytest.raises(error, match=error_message):
-            dev._validate_pulses(pulses)
+        with pytest.raises(RuntimeError, match="No pulses found"):
+            dev_sim._validate_pulses(H_i.pulses)
 
     @pytest.mark.parametrize("coordinates", [coordinates1, coordinates2])
     def test_create_register(self, coordinates):
@@ -378,14 +334,11 @@ class TestBraketAhsDevice:
         and stored on the device"""
 
         dev = BraketLocalAquilaDevice(wires=len(coordinates))
-
+        
         assert dev.register is None
 
         dev._create_register(coordinates)
-        coordinates_from_register = [
-            [x * 1e6, y * 1e6]
-            for x, y in zip(dev.register.coordinate_list(0), dev.register.coordinate_list(1))
-        ]
+        coordinates_from_register = [[x*1e6, y*1e6] for x, y in zip(dev.register.coordinate_list(0), dev.register.coordinate_list(1))]
 
         assert isinstance(dev.register, AtomArrangement)
         assert coordinates_from_register == coordinates
@@ -403,7 +356,7 @@ class TestBraketAhsDevice:
         # check which of initial pulse parameters are callable
         callable_amp = callable(pulse.amplitude)
         callable_phase = callable(pulse.phase)
-        callable_detuning = callable(pulse.frequency)
+        callable_detuning = callable(pulse.detuning)
 
         # get an expected value for each pulse parameter at t=1.7
         if callable_amp:
@@ -419,10 +372,10 @@ class TestBraketAhsDevice:
             phase_sample = pulse.phase
 
         if callable_detuning:
-            detuning_sample = pulse.frequency(params[idx], 1.7)
+            detuning_sample = pulse.detuning(params[idx], 1.7)
             idx += 1
         else:
-            detuning_sample = pulse.frequency
+            detuning_sample = pulse.detuning
 
         # evaluate pulses
         dev_sim._evaluate_pulses(ev_op)
@@ -442,10 +395,10 @@ class TestBraketAhsDevice:
             assert phase_sample == dev_sim.pulses[0].phase
 
         if callable_detuning:
-            assert isinstance(dev_sim.pulses[0].frequency, partial)
-            assert detuning_sample == dev_sim.pulses[0].frequency(1.7)
+            assert isinstance(dev_sim.pulses[0].detuning, partial)
+            assert detuning_sample == dev_sim.pulses[0].detuning(1.7)
         else:
-            assert detuning_sample == dev_sim.pulses[0].frequency
+            assert detuning_sample == dev_sim.pulses[0].detuning
 
     @pytest.mark.parametrize("time_interval", [[1.5, 2.3], [0, 1.2], [0.111, 3.789]])
     def test_get_sample_times(self, time_interval):
@@ -454,11 +407,11 @@ class TestBraketAhsDevice:
         times = dev_sim._get_sample_times(time_interval)
 
         num_points = len(times)
-        diffs = [times[i] - times[i - 1] for i in range(1, num_points)]
+        diffs = [times[i]-times[i-1] for i in range(1, num_points)]
 
         # start and end times match but are in units of s and us respectively
-        assert times[0] * 1e6 == time_interval[0]
-        assert times[-1] * 1e6 == time_interval[1]
+        assert times[0]*1e6 == time_interval[0]
+        assert times[-1]*1e6 == time_interval[1]
 
         # distances between points are close to but exceed 50ns
         assert all(d > 50e-9 for d in diffs)
@@ -490,30 +443,22 @@ class TestBraketAhsDevice:
 
     def test_convert_to_time_series_scaling_factor(self):
         """Test creating a TimeSeries from pulse information and time set-points"""
-
         def f(t):
             return np.sin(t)
 
         times_us = [0, 1, 2, 3, 4, 5]  # microseconds
         times_s = [t * 1e-6 for t in times_us]  # seconds
 
-        ts = dev_sim._convert_to_time_series(
-            pulse_parameter=f, time_points=times_s, scaling_factor=1.7
-        )
-        expected_vals = [np.sin(t) * 1.7 for t in times_us]
+        ts = dev_sim._convert_to_time_series(pulse_parameter=f, time_points=times_s, scaling_factor=1.7)
+        expected_vals = [np.sin(t)*1.7 for t in times_us]
 
         assert ts.times() == times_s
         assert ts.values() == expected_vals
 
-    @pytest.mark.parametrize(
-        "pulse",
-        [
-            HardwarePulse(1, 2, sin_fn, wires=[0, 1, 2]),
-            HardwarePulse(cos_fn, 1.7, 2.3, wires=[0, 1, 2]),
-            HardwarePulse(3.8, lin_fn, 1.9, wires=[0, 1, 2]),
-            HardwarePulse(lin_fn, sin_fn, quad_fn, wires=[0, 1, 2]),
-        ],
-    )
+    @pytest.mark.parametrize("pulse", [HardwarePulse(1, 2, sin_fn, wires=[0, 1, 2]),
+                                       HardwarePulse(cos_fn, 1.7, 2.3, wires=[0, 1, 2]),
+                                       HardwarePulse(3.8, lin_fn, 1.9, wires=[0, 1, 2]),
+                                       HardwarePulse(lin_fn, sin_fn, quad_fn, wires=[0, 1, 2])])
     def test_convert_pulse_to_driving_field(self, pulse):
         """Test that a time interval in microseconds (as passed to the qnode in PennyLane)
         and a Pulse object containing constant or time-dependent pulse parameters (floats
