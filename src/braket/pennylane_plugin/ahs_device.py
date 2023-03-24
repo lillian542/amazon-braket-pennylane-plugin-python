@@ -1,3 +1,16 @@
+# Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"). You
+# may not use this file except in compliance with the License. A copy of
+# the License is located at
+#
+#     http://aws.amazon.com/apache2.0/
+#
+# or in the "license" file accompanying this file. This file is
+# distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF
+# ANY KIND, either express or implied. See the License for the specific
+# language governing permissions and limitations under the License.
+
 """
 Devices
 =======
@@ -25,7 +38,7 @@ import numpy as np
 
 from pennylane import QubitDevice
 from pennylane._version import __version__
-from pennylane.pulse.rydberg_hamiltonian import RydbergHamiltonian, RydbergPulse
+from pennylane.pulse.hardware_hamiltonian import HardwarePulse, HardwareHamiltonian
 
 from braket.aws import AwsDevice
 from braket.devices import Device, LocalSimulator
@@ -143,7 +156,7 @@ class BraketAhsDevice(QubitDevice):
 
     def _validate_operations(self, operations):
         """Confirms that the list of operations provided contains a single ParametrizedEvolution
-        from a RydbergHamiltonian with only a single, global pulse"""
+        from a HardwareHamiltonian with only a single, global pulse"""
 
         if len(operations) > 1:
             raise NotImplementedError(
@@ -153,11 +166,11 @@ class BraketAhsDevice(QubitDevice):
 
         ev_op = operations[0]  # only one!
 
-        if not isinstance(ev_op.H, RydbergHamiltonian):
+        if not isinstance(ev_op.H, HardwareHamiltonian):
             raise RuntimeError(
-                f"Expected a RydbergHamiltonian instance for interfacing with the device, but "
+                f"Expected a HardwareHamiltonian instance for interfacing with the device, but "
                 f"recieved {type(ev_op.H)}."
-            )
+                )
 
         if not set(ev_op.wires) == set(self.wires):
             raise RuntimeError(
@@ -174,10 +187,10 @@ class BraketAhsDevice(QubitDevice):
             )
 
     def _validate_pulses(self, pulses):
-        """Confirms that the list of RydbergPulses describes a single, global pulse
+        """Confirms that the list of HardwarePulses describes a single, global pulse
 
         Args:
-            pulses: List of RydbergPulses
+            pulses: List of HardwarePulses
 
         Raises:
             RuntimeError, NotImplementedError"""
@@ -187,8 +200,8 @@ class BraketAhsDevice(QubitDevice):
 
         if len(pulses) > 1:
             raise NotImplementedError(
-                f"Multiple pulses in a Rydberg Hamiltonian are not currently supported on "
-                f"hardware. Recieved {len(pulses)} pulses."
+                f"Multiple pulses in a Hamiltonian are not currently supported. "
+                f"Recieved {len(pulses)} pulses."
             )
 
         if pulses[0].wires != self.wires:
@@ -240,9 +253,7 @@ class BraketAhsDevice(QubitDevice):
                 detuning = partial(pulse.detuning, params[idx])
                 idx += 1
 
-            evaluated_pulses.append(
-                RydbergPulse(amplitude=amplitude, phase=phase, detuning=detuning, wires=pulse.wires)
-            )
+            evaluated_pulses.append(HardwarePulse(amplitude=amplitude, phase=phase, detuning=detuning, wires=pulse.wires))
 
         self.pulses = evaluated_pulses
 
@@ -293,11 +304,11 @@ class BraketAhsDevice(QubitDevice):
         return ts
 
     def _convert_pulse_to_driving_field(self, pulse, time_interval):
-        """Converts a ``RydbergPulse`` from PennyLane describing a global drive to a
+        """Converts a ``HardwarePulse`` from PennyLane describing a global drive to a 
         ``DrivingField`` from Braket AHS
 
         Args:
-            pulse[RydbergPulse]: a dataclass object containing amplitude, phase and detuning
+            pulse[HardwarePulse]: a dataclass object containing amplitude, phase and detuning 
                 information
             time_interval(array[Number, Number]]): The start and end time for the applied pulse
 
