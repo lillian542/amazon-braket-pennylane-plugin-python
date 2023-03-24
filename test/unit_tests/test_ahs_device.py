@@ -11,8 +11,8 @@ from braket.tasks.analog_hamiltonian_simulation_quantum_task_result import ShotR
 
 import pennylane as qml
 import numpy as np
+from pennylane.pulse.parametrized_evolution import ParametrizedEvolution
 from pennylane.pulse.rydberg_hamiltonian import RydbergHamiltonian, RydbergPulse, rydberg_drive, rydberg_interaction
-#from jax import numpy as jnp
 from dataclasses import dataclass
 from functools import partial
 
@@ -32,13 +32,11 @@ def f2(p, t):
     return p[0] * np.cos(p[1] * t**2)
 
 
-# realistic amplitude function (0 at start and end for hardware)
 def amp(p, t):
-    f = p[0] * np.exp(-(t-p[1])**2/(2*p[2]**2))
-    return qml.pulse.rect(f, windows=[0.1, 1.7])(p, t)
+    return p[0] * np.exp(-(t-p[1])**2/(2*p[2]**2))
 
 
-# functions of time to use as partially evaluated callalbe parameters in tests
+# functions of time to use as partially evaluated callable parameters in tests
 def sin_fn(t):
     return np.sin(t)
 
@@ -150,9 +148,9 @@ class TestBraketAhsDevice:
     def test_settings(self):
         dev = dev_sim
         assert isinstance(dev.settings, dict)
-        assert 'interaction_coefficient' in dev.settings.keys()
+        assert 'interaction_coeff' in dev.settings.keys()
         assert len(dev.settings.keys()) == 1
-        assert dev.settings['interaction_coefficient'] == 862690
+        assert dev.settings['interaction_coeff'] == 862690
 
     @pytest.mark.parametrize("dev_cls, shots", [(BraketAquilaDevice, 1000),
                                                 (BraketAquilaDevice, 2),
@@ -188,7 +186,7 @@ class TestBraketAhsDevice:
     def test_apply(self, hamiltonian, params):
         """Test that apply creates and saves an ahs_program and samples as expected"""
         t = 0.4
-        operations = [qml.evolve(hamiltonian)(params, t)]
+        operations = [ParametrizedEvolution(hamiltonian, params, t)]
         dev = BraketLocalAquilaDevice(wires=operations[0].wires)
 
         assert dev.samples is None
@@ -215,7 +213,7 @@ class TestBraketAhsDevice:
         """Test that we can create an AnalogueHamiltonianSimulation from an
         evolution operator and store it on the device"""
 
-        evolution = qml.evolve(hamiltonian)(params, 1.5)
+        evolution = ParametrizedEvolution(hamiltonian, params, 1.5)
         dev = BraketLocalAquilaDevice(wires=3)
 
         assert dev.ahs_program is None
@@ -277,10 +275,10 @@ class TestBraketAhsDevice:
         dev2 = BraketLocalAquilaDevice(wires=len(H.wires)+1)
 
         with pytest.raises(RuntimeError, match="Device wires must match wires of the evolution."):
-            dev1._validate_operations([qml.evolve(H)([], 1)])
+            dev1._validate_operations([ParametrizedEvolution(H, [], 1)])
 
         with pytest.raises(RuntimeError, match="Device wires must match wires of the evolution."):
-            dev2._validate_operations([qml.evolve(H)([], 1)])
+            dev2._validate_operations([ParametrizedEvolution(H, [], 1)])
 
     def test_validate_operations_register_matches_wires(self):
         """Test that en error is raised in the length of the register doesn't match
@@ -294,7 +292,7 @@ class TestBraketAhsDevice:
         dev = BraketLocalAquilaDevice(wires=4)
 
         with pytest.raises(RuntimeError, match="The defined interaction term has register"):
-            dev._validate_operations([qml.evolve(H)([], 1)])
+            dev._validate_operations([ParametrizedEvolution(H, [], 1)])
 
     def test_validate_operations_not_rydberg_hamiltonian(self):
         """Test that an error is raised if the ParametrizedHamiltonian on the operator
@@ -332,7 +330,7 @@ class TestBraketAhsDevice:
     def test_evaluate_pulses(self, hamiltonian, params):
         """Test that the callables describing pulses are partially evaluated as expected"""
 
-        ev_op = qml.evolve(hamiltonian)(params, 1.5)
+        ev_op = ParametrizedEvolution(hamiltonian, params, 1.5)
 
         pulse = ev_op.H.pulses[0]
         params = ev_op.parameters
