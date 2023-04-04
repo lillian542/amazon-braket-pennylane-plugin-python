@@ -1,20 +1,19 @@
 from functools import partial
-import numpy as np
 
-from braket.aws import AwsDevice
-from braket.devices import LocalSimulator
-from braket.ahs.atom_arrangement import AtomArrangement
+import numpy as np
+import pennylane.math as math
 from braket.ahs.analog_hamiltonian_simulation import AnalogHamiltonianSimulation
+from braket.ahs.atom_arrangement import AtomArrangement
 from braket.ahs.driving_field import DrivingField
-from braket.ahs.shifting_field import ShiftingField
-from braket.timings.time_series import TimeSeries
 from braket.ahs.field import Field
 from braket.ahs.pattern import Pattern
-
+from braket.ahs.shifting_field import ShiftingField
+from braket.aws import AwsDevice
+from braket.devices import LocalSimulator
+from braket.timings.time_series import TimeSeries
 from pennylane import QubitDevice
 from pennylane._version import __version__
 from pennylane.pulse.rydberg_hamiltonian import RydbergHamiltonian, RydbergPulse
-import pennylane.math as math
 
 
 class BraketAhsDevice(QubitDevice):
