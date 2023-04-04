@@ -23,6 +23,8 @@ from braket.ahs.analog_hamiltonian_simulation import AnalogHamiltonianSimulation
 from braket.ahs.atom_arrangement import AtomArrangement
 from braket.ahs.driving_field import DrivingField
 from braket.tasks.analog_hamiltonian_simulation_quantum_task_result import ShotResult
+from braket.tasks.local_quantum_task import LocalQuantumTask
+from braket.timings.time_series import TimeSeries
 
 import pennylane as qml
 import numpy as np
@@ -34,7 +36,7 @@ from pennylane.pulse.hardware_hamiltonian import HardwareHamiltonian, HardwarePu
 from dataclasses import dataclass
 from functools import partial
 
-from braket.pennylane_plugin.ahs_device import BraketAquilaDevice, BraketLocalAquilaDevice
+from braket.pennylane_plugin.ahs_device import BraketLocalAquilaDevice
 
 coordinates1 = [[0, 0], [0, 5], [5, 0], [10, 5], [5, 10], [10, 10]]
 wires1 = [1, 6, 0, 2, 4, 3]
@@ -86,10 +88,8 @@ HAMILTONIANS_AND_PARAMS = [(H_i + drive(amplitude=4, phase=1, detuning=3, wires=
                 ]
 
 
-DEV_ATTRIBUTES = [(BraketAquilaDevice, "Aquila", "braket.aws.aquila"),
-                  (BraketLocalAquilaDevice, "RydbergAtomSimulator", "braket.local.aquila")]
+DEV_ATTRIBUTES = [(BraketLocalAquilaDevice, "RydbergAtomSimulator", "braket.local.aquila")]
 
-dev_hw = BraketAquilaDevice(wires=3)
 dev_sim = BraketLocalAquilaDevice(wires=3, shots=17)
 
 
@@ -179,9 +179,7 @@ class TestBraketAhsDevice:
         assert len(dev.settings.keys()) == 1
         assert dev.settings['interaction_coeff'] == 862690
 
-    @pytest.mark.parametrize("dev_cls, shots", [(BraketAquilaDevice, 1000),
-                                                (BraketAquilaDevice, 2),
-                                                (BraketLocalAquilaDevice, 1000),
+    @pytest.mark.parametrize("dev_cls, shots", [(BraketLocalAquilaDevice, 1000),
                                                 (BraketLocalAquilaDevice, 2)])
     def test_setting_shots(self, dev_cls, shots):
         """Test that setting shots changes number of shots from default (100)"""
@@ -197,8 +195,6 @@ class TestBraketAhsDevice:
     @pytest.mark.parametrize(
         "dev_cls, wires",
         [
-            (BraketAquilaDevice, 2),
-            (BraketAquilaDevice, [0, 2, 4]),
             (BraketLocalAquilaDevice, [0, "a", 7]),
             (BraketLocalAquilaDevice, 7),
         ],
@@ -346,7 +342,7 @@ class TestBraketAhsDevice:
         """Test that _validate_pulses raises an error if there are no pulses saved
         on the Hamiltonian"""
 
-        with pytest.raises(RuntimeError, match="No pulses found"):
+        with pytest.raises(ValueError, match="does not define a driving field"):
             dev_sim._validate_pulses(H_i.pulses)
 
     @pytest.mark.parametrize("coordinates", [coordinates1, coordinates2])
@@ -512,17 +508,17 @@ class TestBraketAhsDevice:
 class TestLocalAquilaDevice:
     """Test functionality specific to the local simulator device"""
 
-    def test_validate_operations_multiple_drive_terms(self):
+    def test_validate_operations_multiple_global_drive_terms(self):
         """Test that an error is raised if there are multiple drive terms on
         the Hamiltonian"""
-        pulses = [HardwarePulse(3, 4, 5, [0, 1]), HardwarePulse(4, 6, 7, [1, 2])]
+        pulses = [HardwarePulse(3, 4, 5, [0, 1, 2]), HardwarePulse(4, 6, 7, [1, 0, 2])]
 
-        with pytest.raises(NotImplementedError, match="Multiple pulses in a Hamiltonian are not currently supported"):
+        with pytest.raises(ValueError, match="with multiple global drives"):
             dev_sim._validate_pulses(pulses)
 
-    @pytest.mark.parametrize("pulse_wires, dev_wires, res", [([0, 1, 2], [0, 1, 2, 3], 'error'),  # subset
-                                                             ([5, 6, 7, 8, 9], [4, 5, 6, 7, 8], 'error'),  # mismatch
-                                                             ([0, 1, 2, 3, 6], [1, 2, 3], 'error'),
+    @pytest.mark.parametrize("pulse_wires, dev_wires, res", [([0, 1, 2], [0, 1, 2, 3], 'error_sub'),  # subset
+                                                             ([5, 6, 7, 8, 9], [4, 5, 6, 7, 8], 'error_mis'),  # mismatch
+                                                             ([0, 1, 2, 3, 6], [1, 2, 3], 'error_mis'),
                                                              ([0, 1, 2], [0, 1, 2], 'success')])
     def test_validate_pulse_is_global_drive(self, pulse_wires, dev_wires, res):
         """Test that an error is raised if the pulse does not describe a global drive"""
@@ -530,9 +526,15 @@ class TestLocalAquilaDevice:
         dev = BraketLocalAquilaDevice(wires=dev_wires)
         pulse = HardwarePulse(3, 4, 5, pulse_wires)
 
-        if res == "error":
+        if res == "error_sub":
             with pytest.raises(
-                NotImplementedError, match="Only global drive is currently supported"
+                ValueError,
+                match="does not define a driving field that applies to all wires"
+            ):
+                dev._validate_pulses([pulse])
+        elif res == "error_mis":
+            with pytest.raises(
+                ValueError, match="which are not a subset of device wires"
             ):
                 dev._validate_pulses([pulse])
         else:

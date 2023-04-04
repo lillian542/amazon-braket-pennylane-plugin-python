@@ -548,12 +548,17 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
         # Iterate through pulses to find global drive
         global_index = -1
         for i, pulse in enumerate(pulses):
-            if len(pulse.wires) == self.wires:
+            if set(pulse.wires) == set(self.wires):
                 if global_index != -1:
                     raise ValueError(
                         "Cannot execute a ParametrizedEvolution with multiple global drives."
                     )
                 global_index = i
+            elif not set(pulse.wires).issubset(set(self.wires)):
+                raise ValueError(
+                    f"ParametrizedEvolution contains wires {pulse.wires} which are not a subset "
+                    f"of device wires {self.wires}."
+                )
 
         # Validate that global drive covers all wires
         if global_index == -1:
