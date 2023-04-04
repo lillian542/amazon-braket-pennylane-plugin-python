@@ -64,8 +64,6 @@ setup(
             "tox",
             "tensorflow>=2.6.0",
             "torch>=1.11",
-            "jax==0.4.3",
-            "jaxlib==0.4.3"
         ]
     },
     url="https://github.com/aws/amazon-braket-pennylane-plugin-python",

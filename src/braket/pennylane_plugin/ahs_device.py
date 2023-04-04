@@ -1,7 +1,47 @@
-from functools import partial
+# Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"). You
+# may not use this file except in compliance with the License. A copy of
+# the License is located at
+#
+#     http://aws.amazon.com/apache2.0/
+#
+# or in the "license" file accompanying this file. This file is
+# distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF
+# ANY KIND, either express or implied. See the License for the specific
+# language governing permissions and limitations under the License.
 
+"""
+Devices
+=======
+
+**Module name:** :mod:`braket.pennylane_braket.ahs_device`
+
+.. currentmodule:: braket.pennylane_braket.ahs_device
+
+Braket Analogue Hamiltonian Simulation (AHS) devices to be used with PennyLane
+
+Classes
+-------
+
+.. autosummary::
+   BraketAquilaDevice
+   BraketLocalAquilaDevice
+
+Code details
+~~~~~~~~~~~~
+"""
+from functools import partial
+from typing import Iterable, Union, Optional
 import numpy as np
-import pennylane.math as math
+
+from pennylane import QubitDevice
+from pennylane._version import __version__
+from pennylane.pulse.hardware_hamiltonian import HardwarePulse, HardwareHamiltonian
+
+from braket.aws import AwsDevice, AwsSession, AwsQuantumTask
+from braket.devices import Device, LocalSimulator
+from braket.ahs.atom_arrangement import AtomArrangement
 from braket.ahs.analog_hamiltonian_simulation import AnalogHamiltonianSimulation
 from braket.ahs.atom_arrangement import AtomArrangement
 from braket.ahs.driving_field import DrivingField
@@ -11,9 +51,6 @@ from braket.ahs.shifting_field import ShiftingField
 from braket.aws import AwsDevice
 from braket.devices import LocalSimulator
 from braket.timings.time_series import TimeSeries
-from pennylane import QubitDevice
-from pennylane._version import __version__
-from pennylane.pulse.rydberg_hamiltonian import RydbergHamiltonian, RydbergPulse
 
 
 class BraketAhsDevice(QubitDevice):
@@ -23,6 +60,7 @@ class BraketAhsDevice(QubitDevice):
         wires (int or Iterable[Number, str]]): Number of subsystems represented by the device,
             or iterable that contains unique labels for the subsystems as numbers
             (i.e., ``[-1, 0, 2]``) or strings (``['ancilla', 'q1', 'q2']``).
+        device (Device): The Amazon Braket device to use with PennyLane.
         shots (int): Number of executions to run to aquire measurements. Defaults to 100.
     """
 
@@ -33,19 +71,40 @@ class BraketAhsDevice(QubitDevice):
 
     operations = {"ParametrizedEvolution"}
 
-    def __init__(self, wires, device, *, shots=100):
+    def __init__(
+            self,
+            wires: Union[int, Iterable],
+            device: Device, *,
+            shots: int = 100
+    ):
         if not shots:
             raise RuntimeError(f"This device requires shots. Recieved shots={shots}")
         self._device = device
+
         super().__init__(wires=wires, shots=shots)
 
         self.register = None
+        self.pulses = None
         self.ahs_program = None
         self.samples = None
 
     @property
     def settings(self):
-        return {"interaction_coefficient": 862690}  # MHz x um^6
+        """Dictionary of constants set by the hardware.
+
+        Used to enable initializing hardware-consistent Hamiltonians by saving
+        all the values that would need to be passed, i.e. :
+
+        >>> dev_remote = qml.device('braket.aws.aquila', wires=3)
+        >>> dev_pl = qml.device('default.qubit', wires=3)
+        >>> settings = dev_remote.settings
+        >>> H_int = rydberg_interaction(coordinates, **settings)
+
+        If `H_int` is included in a hamiltonian used on the PennyLane `default.qubit` device,
+        it will use the harware-specific constants.
+
+        """
+        return {"interaction_coeff": 862690}  # MHz x um^6
 
     def apply(self, operations, **kwargs):
         """Convert the pulse operation to an AHS program and run on the connected device"""
@@ -60,6 +119,8 @@ class BraketAhsDevice(QubitDevice):
 
         ev_op = operations[0]  # only one!
 
+        self._validate_pulses(ev_op.H.pulses)
+
         ahs_program = self.create_ahs_program(ev_op)
 
         task = self._run_task(ahs_program)
@@ -71,6 +132,10 @@ class BraketAhsDevice(QubitDevice):
 
     def create_ahs_program(self, evolution):
         """Create AHS program for upload to hardware from a ParametrizedEvolution
+
+        Args:
+            evolution (ParametrizedEvolution): the PennyLane operator describing the pulse
+                to be converted into an Analogue Hamiltonian Simulation program
 
         Returns:
             AnalogHamiltonianSimulation: a program containing the register and drive
@@ -101,7 +166,7 @@ class BraketAhsDevice(QubitDevice):
 
     def _validate_operations(self, operations):
         """Confirms that the list of operations provided contains a single ParametrizedEvolution
-        from a RydbergHamiltonian with only a single, global pulse"""
+        from a HardwareHamiltonian with only a single, global pulse"""
 
         if len(operations) > 1:
             raise NotImplementedError(
@@ -111,16 +176,17 @@ class BraketAhsDevice(QubitDevice):
 
         ev_op = operations[0]  # only one!
 
-        if not isinstance(ev_op.H, RydbergHamiltonian):
+        if not isinstance(ev_op.H, HardwareHamiltonian):
             raise RuntimeError(
-                f"Expected a RydbergHamiltonian instance for interfacing with the device, but "
+                f"Expected a HardwareHamiltonian instance for interfacing with the device, but "
                 f"recieved {type(ev_op.H)}."
-            )
+                )
 
         if not set(ev_op.wires) == set(self.wires):
             raise RuntimeError(
-                f"Device contains wires {self.wires}, but received a `ParametrizedEvolution` operator "
-                f"working on wires {ev_op.wires}. Device wires must match wires of the evolution."
+                f"Device contains wires {self.wires}, but received a `ParametrizedEvolution` "
+                f"operator working on wires {ev_op.wires}. Device wires must match wires of "
+                f"the evolution."
             )
 
         if len(ev_op.H.register) != len(self.wires):
@@ -130,13 +196,33 @@ class BraketAhsDevice(QubitDevice):
                 f"({len(self.wires)})"
             )
 
-        self._validate_pulses(ev_op.H.pulses)
-
     def _validate_pulses(self, pulses):
-        raise NotImplementedError("Validation of pulses not implemented in the base class")
+        """Confirms that the list of HardwarePulses describes a single, global pulse
+
+        Args:
+            pulses: List of HardwarePulses
+
+        Raises:
+            RuntimeError, NotImplementedError"""
+
+        if not pulses:
+            raise RuntimeError("No pulses found in the ParametrizedEvolution")
+
+        if len(pulses) > 1:
+            raise NotImplementedError(
+                f"Multiple pulses in a Hamiltonian are not currently supported. "
+                f"Recieved {len(pulses)} pulses."
+            )
+
+        if pulses[0].wires != self.wires:
+            raise NotImplementedError(
+                f"Only global drive is currently supported. Found drive defined for subset "
+                f"{[pulses[0].wires]} of all wires [{self.wires}]"
+            )
 
     def _create_register(self, coordinates):
-        """Create an AtomArrangement to describe the atom layout from the coordinates in the ParametrizedEvolution"""
+        """Create an AtomArrangement to describe the atom layout from the coordinates in the
+        ParametrizedEvolution, and saves it as self.register"""
 
         register = AtomArrangement()
         for [x, y] in coordinates:
@@ -146,8 +232,9 @@ class BraketAhsDevice(QubitDevice):
         self.register = register
 
     def _evaluate_pulses(self, ev_op):
-        """Feeds in the parameters in order to partially evaluate the callables (amplitude, phase and/or detuning)
-        describing the pulses, so they are only a function of time. Saves the on the device as `dev.pulses`.
+        """Feeds in the parameters in order to partially evaluate the callables (amplitude,
+        phase and/or detuning) describing the pulses, so they are only a function of time.
+        Saves the pulses on the device as `dev.pulses`.
 
         Args:
             ev_op(ParametrizedEvolution): the operator containing the pulses to be evaluated
@@ -176,9 +263,7 @@ class BraketAhsDevice(QubitDevice):
                 detuning = partial(pulse.detuning, params[idx])
                 idx += 1
 
-            evaluated_pulses.append(
-                RydbergPulse(amplitude=amplitude, phase=phase, detuning=detuning, wires=pulse.wires)
-            )
+            evaluated_pulses.append(HardwarePulse(amplitude=amplitude, phase=phase, detuning=detuning, wires=pulse.wires))
 
         self.pulses = evaluated_pulses
 
@@ -204,12 +289,12 @@ class BraketAhsDevice(QubitDevice):
         """Converts pulse information into a TimeSeries
 
         Args:
-            pulse_parameter(Union[float, Callable]): a physical parameter (pulse, amplitude or detuning) of the
-                pulse. If this is a callalbe, it has already been partially evaluated, such that it is only a
-                function of time.
-            time_points(array): the times where parameters will be set in the TimeSeries, specified in seconds
-            scaling_factor(float): A multiplication factor for the pulse_parameter where relevant to convert
-                between units. Defaults to 1.
+            pulse_parameter(Union[float, Callable]): a physical parameter (pulse, amplitude
+                or detuning) of the pulse. If this is a callalbe, it has already been partially
+                evaluated, such that it is only a function of time.
+            time_points(array): the times where parameters will be set in the TimeSeries, specified
+                in seconds scaling_factor(float): A multiplication factor for the pulse_parameter
+                where relevant to convert between units. Defaults to 1.
 
         Returns:
             TimeSeries: a description of setpoints and corresponding times
@@ -218,7 +303,7 @@ class BraketAhsDevice(QubitDevice):
         ts = TimeSeries()
 
         if callable(pulse_parameter):
-            # convert time to microseconds to evaluate values - this is the expected unit for the PL functions
+            # convert time to microseconds to evaluate (expected unit for the PL functions)
             vals = [float(pulse_parameter(t * 1e6)) * scaling_factor for t in time_points]
         else:
             vals = [pulse_parameter for t in time_points]
@@ -229,20 +314,22 @@ class BraketAhsDevice(QubitDevice):
         return ts
 
     def _convert_pulse_to_driving_field(self, pulse, time_interval):
-        """Converts a ``RydbergPulse`` from PennyLane describing a global drive to a ``DrivingField``
-        from Braket AHS
+        """Converts a ``HardwarePulse`` from PennyLane describing a global drive to a 
+        ``DrivingField`` from Braket AHS
 
         Args:
-            pulse[RydbergPulse]: a dataclass object containing amplitude, phase and detuning information
+            pulse[HardwarePulse]: a dataclass object containing amplitude, phase and detuning 
+                information
             time_interval(array[Number, Number]]): The start and end time for the applied pulse
 
         Returns:
-            DrivingField: the object representing the global drive for the AnalogueHamiltonianSimulation object
+            DrivingField: the object representing the global drive for the
+                AnalogueHamiltonianSimulation object
         """
 
         time_points = self._get_sample_times(time_interval)
 
-        # scaling factor for amplitude and detunig convert MHz (expected PL input) to rad/s (upload units)
+        # scaling factor for amp and detuning converts MHz (PL input) to rad/s (upload units)
         amplitude = self._convert_to_time_series(
             pulse.amplitude, time_points, scaling_factor=2 * np.pi * 1e6
         )
@@ -257,16 +344,17 @@ class BraketAhsDevice(QubitDevice):
 
     @staticmethod
     def _result_to_sample_output(res):
-        """This function converts a single shot of the QuEra measurement results to 0 (ground), 1 (excited)
-        and NaN (failed to measure) for all atoms in the result.
+        """This function converts a single shot of the QuEra measurement results to
+        0 (ground), 1 (excited) and NaN (failed to measure) for all atoms in the result.
 
         The QuEra results are summarized via 3 values: status, pre_sequence, and post_sequence.
 
-        Status is success or fail. The pre_sequence is 1 if an atom in the ground state was successfully
-        initialized, and 0 otherwise. The post_sequence is 1 if an atom in the ground state was measured,
-        and 0 otherwise. Comparison of pre_sequence and post_sequence reveals one of 3 possible outcomes:
+        Status is success or fail. The pre_sequence is 1 if an atom in the ground state was
+        successfully initialized, and 0 otherwise. The post_sequence is 1 if an atom in the
+        ground state was measured, and 0 otherwise. Comparison of pre_sequence and post_sequence
+        reveals one of 3 possible outcomes:
 
-        0 --> 0: Atom failed to be placed, no measurement (no atom in the ground state either before or after)
+        0 --> 0: Atom failed to be placed (no atom detected in the ground state either before or after)
         1 --> 0: Atom initialized, measured in Rydberg state (atom in ground state detected before, but not after)
         1 --> 1: Atom initialized, measured in ground state (atom in ground state detected both before and after)
         """
@@ -283,13 +371,22 @@ class BraketAhsDevice(QubitDevice):
 
 
 class BraketAquilaDevice(BraketAhsDevice):
-    """Amazon Braket AHS device for QuEra Aquila hardware for PennyLane.
+    """Amazon Braket AHS device on QuEra Aquila hardware for PennyLane.
 
     Args:
         wires (int or Iterable[Number, str]]): Number of subsystems represented by the device,
             or iterable that contains unique labels for the subsystems as numbers
             (i.e., ``[-1, 0, 2]``) or strings (``['ancilla', 'q1', 'q2']``).
+        s3_destination_folder (AwsSession.S3DestinationFolder): Name of the S3 bucket
+            and folder, specified as a tuple.
         shots (int): Number of executions to run to aquire measurements. Defaults to 100.
+        aws_session (Optional[AwsSession]): An AwsSession object created to manage
+            interactions with AWS services, to be supplied if extra control
+            is desired. Default: None
+        poll_timeout_seconds (float): Total time in seconds to wait for
+            results before timing out.
+        poll_interval_seconds (float): The polling interval for results in seconds.
+
     """
 
     name = "Braket QuEra Aquila PennyLane plugin"
@@ -297,12 +394,26 @@ class BraketAquilaDevice(BraketAhsDevice):
 
     ARN_NR = "arn:aws:braket:us-east-1::device/qpu/quera/Aquila"
 
-    def __init__(self, wires, *, shots=100):
-        dev = AwsDevice(self.ARN_NR)
-        super().__init__(wires=wires, device=dev, shots=shots)
+    def __init__(
+            self,
+            wires: Union[int, Iterable],
+            s3_destination_folder: AwsSession.S3DestinationFolder = None,
+            *,
+            shots: int = 100,
+            poll_timeout_seconds: float = AwsQuantumTask.DEFAULT_RESULTS_POLL_TIMEOUT,
+            poll_interval_seconds : float = AwsQuantumTask.DEFAULT_RESULTS_POLL_INTERVAL,
+            aws_session: Optional[AwsSession] = None,
+    ):
+        device = AwsDevice(self.ARN_NR, aws_session=aws_session)
+        user_agent = f"BraketPennylanePlugin/{__version__}"
+        device.aws_session.add_braket_user_agent(user_agent)
+        
+        super().__init__(wires=wires, device=device, shots=shots)
 
-        self.ahs_program = None
-        self.samples = None
+        self._s3_folder = s3_destination_folder
+        self._poll_timeout_seconds = poll_timeout_seconds
+        self._poll_interval_seconds = poll_interval_seconds
+
 
     @property
     def hardware_capabilities(self):
@@ -311,24 +422,14 @@ class BraketAquilaDevice(BraketAhsDevice):
 
     def _run_task(self, ahs_program):
         discretized_ahs_program = ahs_program.discretize(self._device)
-        task = self._device.run(discretized_ahs_program, shots=self.shots)
+        task = self._device.run(
+            discretized_ahs_program,
+            s3_destination_folder=self._s3_folder,
+            shots=self.shots,
+            poll_timeout_seconds=self._poll_timeout_seconds,
+            poll_interval_seconds=self._poll_interval_seconds,
+        )
         return task
-
-    def _validate_pulses(self, pulses):
-        if not pulses:
-            raise RuntimeError("No pulses found in the ParametrizedEvolution")
-
-        if len(pulses) > 1:
-            raise NotImplementedError(
-                f"Multiple pulses in a Rydberg Hamiltonian are not currently supported on "
-                f"hardware. Recieved {len(pulses)} pulses."
-            )
-
-        if pulses[0].wires != self.wires:
-            raise NotImplementedError(
-                f"Only global drive is currently supported on hardware. Found drive defined for subset "
-                f"{[pulses[0].wires]} of all wires [{self.wires}]"
-            )
 
 
 class BraketLocalAquilaDevice(BraketAhsDevice):
@@ -344,10 +445,14 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
     name = "Braket QuEra Aquila PennyLane plugin"
     short_name = "braket.local.aquila"
 
-    def __init__(self, wires, *, shots=100):
-        dev = LocalSimulator("braket_ahs")
-        super().__init__(wires=wires, device=dev, shots=shots)
-        self._global_pulse = None
+    def __init__(
+            self,
+            wires: Union[int, Iterable],
+            *,
+            shots=100
+    ):
+        device = LocalSimulator("braket_ahs")
+        super().__init__(wires=wires, device=device, shots=shots)
 
     def _run_task(self, ahs_program):
         task = self._device.run(ahs_program, shots=self.shots, steps=100)
