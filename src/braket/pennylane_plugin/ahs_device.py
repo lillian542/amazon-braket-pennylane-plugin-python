@@ -35,7 +35,7 @@ from functools import partial
 from typing import Iterable, Union, Optional
 import numpy as np
 
-from pennylane import QubitDevice
+from pennylane import QubitDevice, math
 from pennylane._version import __version__
 from pennylane.pulse.hardware_hamiltonian import HardwarePulse, HardwareHamiltonian
 
@@ -143,7 +143,7 @@ class BraketAhsDevice(QubitDevice):
 
         # sets self.pulses to be the evaluated pulses (now only a function of time)
         self._evaluate_pulses(evolution)
-        self._create_register(evolution.H.register)
+        self._create_register(evolution.H.settings.register)
 
         time_interval = evolution.t
 
@@ -189,11 +189,11 @@ class BraketAhsDevice(QubitDevice):
                 f"the evolution."
             )
 
-        if len(ev_op.H.register) != len(self.wires):
+        if len(ev_op.H.settings.register) != len(self.wires):
             raise RuntimeError(
-                f"The defined interaction term has register {ev_op.H.register} of length "
-                f"{len(ev_op.H.register)}, which does not match the number of wires on the device "
-                f"({len(self.wires)})"
+                f"The defined interaction term has register {ev_op.H.settings.register} of length "
+                f"{len(ev_op.H.settings.register)}, which does not match the number of wires on "
+                f"the device: ({len(self.wires)})"
             )
 
     def _validate_pulses(self, pulses):
@@ -258,12 +258,12 @@ class BraketAhsDevice(QubitDevice):
                 phase = partial(pulse.phase, params[idx])
                 idx += 1
 
-            detuning = pulse.detuning
-            if callable(pulse.detuning):
-                detuning = partial(pulse.detuning, params[idx])
+            detuning = pulse.frequency
+            if callable(pulse.frequency):
+                detuning = partial(pulse.frequency, params[idx])
                 idx += 1
 
-            evaluated_pulses.append(HardwarePulse(amplitude=amplitude, phase=phase, detuning=detuning, wires=pulse.wires))
+            evaluated_pulses.append(HardwarePulse(amplitude=amplitude, phase=phase, frequency=detuning, wires=pulse.wires))
 
         self.pulses = evaluated_pulses
 
@@ -334,7 +334,7 @@ class BraketAhsDevice(QubitDevice):
             pulse.amplitude, time_points, scaling_factor=2 * np.pi * 1e6
         )
         detuning = self._convert_to_time_series(
-            pulse.detuning, time_points, scaling_factor=2 * np.pi * 1e6
+            pulse.frequency, time_points, scaling_factor=2 * np.pi * 1e6
         )
         phase = self._convert_to_time_series(pulse.phase, time_points)
 
@@ -454,17 +454,48 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
         device = LocalSimulator("braket_ahs")
         super().__init__(wires=wires, device=device, shots=shots)
 
+    def create_ahs_program(self, evolution):
+        """Create AHS program for simulation from a ParametrizedEvolution
+
+        Args:
+            evolution (ParametrizedEvolution): the PennyLane operator describing the pulse
+                to be converted into an Analogue Hamiltonian Simulation program
+
+        Returns:
+            AnalogHamiltonianSimulation: a program containing the register and drive
+                information for running an AHS task on simulation or hardware"""
+
+        # sets self.pulses to be the evaluated pulses (now only a function of time)
+        self._evaluate_pulses(evolution)
+        self._create_register(evolution.H.settings.register)
+
+        time_interval = evolution.t
+
+        drive = self._convert_pulse_to_driving_field(self.pulses[self._global_pulse], time_interval)
+
+        # Create local detunings
+        local_detunings = [p.frequency for p in self.pulses]
+        local_detunings.pop(self._global_pulse)
+        detuning, pattern = self._extract_pattern_from_detuning
+        shift = self._convert_pulses_to_shifting_field(detuning, pattern, time_interval)
+
+        H = drive + shift
+        ahs_program = AnalogHamiltonianSimulation(register=self.register, hamiltonian=H)
+
+        self.ahs_program = ahs_program
+
+        return ahs_program
+
     def _run_task(self, ahs_program):
         task = self._device.run(ahs_program, shots=self.shots, steps=100)
         return task
 
-    def _extract_pattern_from_detunings(self, detunings, time_points):
+    def _extract_pattern_from_detunings(self, detunings, time_interval):
         """Use the detunings as defined in PennyLane to find the pattern for the ``ShiftingField``
 
         Args:
             detunings (List[Union[float, callable]]): detunings to extract pattern from
-            time_points (List[float]): the times where parameters will be set in the TimeSeries, specified
-                in seconds
+            time_interval(array[Number, Number]]): The start and end time for the applied pulses
 
         Returns:
             Union[float, callable]: Updated detuning for ``ShiftingField``
@@ -472,6 +503,8 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
         """
         # If a single item is not callable, no others should be callable. This validation happens in
         # ``_validate_pulses``.
+        time_points = self._get_sample_times(time_interval)
+
         if not callable(detunings[0]):
             max_detuning = np.amax(detunings)
             pattern = [det / max_detuning for det in detunings]
@@ -517,7 +550,7 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
         Args:
             detuning (callable): detuning for the local drives
             pattern (Pattern): list containing magnitude of detuning for all atoms in the device
-            time_interval(array[Number, Number]]): The start and end time for the applied pulse
+            time_interval(array[Number, Number]]): The start and end time for the applied pulses
 
         Returns:
             ShiftingField: the object representing the local drive for the AnalogueHamiltonianSimulation object
@@ -575,7 +608,7 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
             return
 
         # Validate that local drives don't have amplitude or phase, and that various detunings aren't inconsistent
-        callable_detunings = callable(local_pulses[0].detuning)
+        callable_detunings = callable(local_pulses[0].frequency)
         local_wires = set()
 
         for pulse in local_pulses:
@@ -591,7 +624,7 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
                 raise ValueError(
                     "Shifting field only allows specification of detuning. Phase must be zero."
                 )
-            if callable(pulse.detuning) and not callable_detunings:
+            if callable(pulse.frequency) and not callable_detunings:
                 raise ValueError("All local drives must have the same shape.")
             if set(pulse.wires).intersection(local_wires):
                 raise ValueError("Local drives must not have overlapping wires.")
