@@ -71,12 +71,7 @@ class BraketAhsDevice(QubitDevice):
 
     operations = {"ParametrizedEvolution"}
 
-    def __init__(
-            self,
-            wires: Union[int, Iterable],
-            device: Device, *,
-            shots: int = 100
-    ):
+    def __init__(self, wires: Union[int, Iterable], device: Device, *, shots: int = 100):
         if not shots:
             raise RuntimeError(f"This device requires shots. Recieved shots={shots}")
         self._device = device
@@ -180,7 +175,7 @@ class BraketAhsDevice(QubitDevice):
             raise RuntimeError(
                 f"Expected a HardwareHamiltonian instance for interfacing with the device, but "
                 f"recieved {type(ev_op.H)}."
-                )
+            )
 
         if not set(ev_op.wires) == set(self.wires):
             raise RuntimeError(
@@ -263,7 +258,11 @@ class BraketAhsDevice(QubitDevice):
                 detuning = partial(pulse.frequency, params[idx])
                 idx += 1
 
-            evaluated_pulses.append(HardwarePulse(amplitude=amplitude, phase=phase, frequency=detuning, wires=pulse.wires))
+            evaluated_pulses.append(
+                HardwarePulse(
+                    amplitude=amplitude, phase=phase, frequency=detuning, wires=pulse.wires
+                )
+            )
 
         self.pulses = evaluated_pulses
 
@@ -314,11 +313,11 @@ class BraketAhsDevice(QubitDevice):
         return ts
 
     def _convert_pulse_to_driving_field(self, pulse, time_interval):
-        """Converts a ``HardwarePulse`` from PennyLane describing a global drive to a 
+        """Converts a ``HardwarePulse`` from PennyLane describing a global drive to a
         ``DrivingField`` from Braket AHS
 
         Args:
-            pulse[HardwarePulse]: a dataclass object containing amplitude, phase and detuning 
+            pulse[HardwarePulse]: a dataclass object containing amplitude, phase and detuning
                 information
             time_interval(array[Number, Number]]): The start and end time for the applied pulse
 
@@ -395,25 +394,24 @@ class BraketAquilaDevice(BraketAhsDevice):
     ARN_NR = "arn:aws:braket:us-east-1::device/qpu/quera/Aquila"
 
     def __init__(
-            self,
-            wires: Union[int, Iterable],
-            s3_destination_folder: AwsSession.S3DestinationFolder = None,
-            *,
-            shots: int = 100,
-            poll_timeout_seconds: float = AwsQuantumTask.DEFAULT_RESULTS_POLL_TIMEOUT,
-            poll_interval_seconds : float = AwsQuantumTask.DEFAULT_RESULTS_POLL_INTERVAL,
-            aws_session: Optional[AwsSession] = None,
+        self,
+        wires: Union[int, Iterable],
+        s3_destination_folder: AwsSession.S3DestinationFolder = None,
+        *,
+        shots: int = 100,
+        poll_timeout_seconds: float = AwsQuantumTask.DEFAULT_RESULTS_POLL_TIMEOUT,
+        poll_interval_seconds: float = AwsQuantumTask.DEFAULT_RESULTS_POLL_INTERVAL,
+        aws_session: Optional[AwsSession] = None,
     ):
         device = AwsDevice(self.ARN_NR, aws_session=aws_session)
         user_agent = f"BraketPennylanePlugin/{__version__}"
         device.aws_session.add_braket_user_agent(user_agent)
-        
+
         super().__init__(wires=wires, device=device, shots=shots)
 
         self._s3_folder = s3_destination_folder
         self._poll_timeout_seconds = poll_timeout_seconds
         self._poll_interval_seconds = poll_interval_seconds
-
 
     @property
     def hardware_capabilities(self):
@@ -445,12 +443,7 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
     name = "Braket QuEra Aquila PennyLane plugin"
     short_name = "braket.local.aquila"
 
-    def __init__(
-            self,
-            wires: Union[int, Iterable],
-            *,
-            shots=100
-    ):
+    def __init__(self, wires: Union[int, Iterable], *, shots=100):
         device = LocalSimulator("braket_ahs")
         super().__init__(wires=wires, device=device, shots=shots)
 
@@ -474,9 +467,8 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
         drive = self._convert_pulse_to_driving_field(self.pulses[self._global_pulse], time_interval)
 
         # Create local detunings
-        local_detunings = [p.frequency for p in self.pulses]
-        local_detunings.pop(self._global_pulse)
-        detuning, pattern = self._extract_pattern_from_detuning
+        local_detunings = self._create_valid_local_detunings()
+        detuning, pattern = self._extract_pattern_from_detunings(local_detunings, time_interval)
         shift = self._convert_pulses_to_shifting_field(detuning, pattern, time_interval)
 
         H = drive + shift
@@ -489,6 +481,26 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
     def _run_task(self, ahs_program):
         task = self._device.run(ahs_program, shots=self.shots, steps=100)
         return task
+
+    def _create_valid_local_detunings(self):
+        """Return ordered list of local detunings for all wires in device.
+
+        Returns:
+            List[Union[callable, float]]: List of detunings covering all device wires.
+        """
+        local_pulses = self.pulses.copy()
+        local_pulses.pop(self._global_pulse)
+
+        callable_detunings = callable(local_pulses[0].frequency)
+        device_detunings = (
+            [lambda t: 0] * len(self.wires) if callable_detunings else [0] * len(self.wires)
+        )
+
+        for pulse in local_pulses:
+            for wire in pulse.wires:
+                device_detunings[self.wires.index(wire)] = pulse.frequency
+
+        return device_detunings
 
     def _extract_pattern_from_detunings(self, detunings, time_interval):
         """Use the detunings as defined in PennyLane to find the pattern for the ``ShiftingField``
@@ -596,7 +608,7 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
         # Validate that global drive covers all wires
         if global_index == -1:
             raise ValueError(
-                "ParametrizedEvolution does not define a driving field that applies to all wires."
+                "ParametrizedEvolution doesn't apply a global driving field to all wires."
             )
 
         self._global_pulse = global_index
@@ -618,13 +630,7 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
                 raise ValueError(
                     "Shifting field only allows specification of detuning. Amplitude must be zero."
                 )
-            if pulse.phase is not None and (
-                callable(pulse.phase) or not math.isclose(pulse.phase, 0.0)
-            ):
-                raise ValueError(
-                    "Shifting field only allows specification of detuning. Phase must be zero."
-                )
-            if callable(pulse.frequency) and not callable_detunings:
+            if callable(pulse.frequency) ^ callable_detunings:
                 raise ValueError("All local drives must have the same shape.")
             if set(pulse.wires).intersection(local_wires):
                 raise ValueError("Local drives must not have overlapping wires.")

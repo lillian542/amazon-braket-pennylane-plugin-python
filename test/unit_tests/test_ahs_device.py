@@ -41,7 +41,7 @@ from braket.pennylane_plugin.ahs_device import BraketLocalAquilaDevice
 coordinates1 = [[0, 0], [0, 5], [5, 0], [10, 5], [5, 10], [10, 10]]
 wires1 = [1, 6, 0, 2, 4, 3]
 
-coordinates2 = [[0, 0], [5.5, 0.0], [2.75, 4.763139720814412]] #in µm
+coordinates2 = [[0, 0], [5.5, 0.0], [2.75, 4.763139720814412]]  # in µm
 H_i = rydberg_interaction(coordinates2)
 
 
@@ -54,7 +54,7 @@ def f2(p, t):
 
 
 def amp(p, t):
-    return p[0] * np.exp(-(t-p[1])**2/(2*p[2]**2))
+    return p[0] * np.exp(-((t - p[1]) ** 2) / (2 * p[2] ** 2))
 
 
 # functions of time to use as partially evaluated callable parameters in tests
@@ -78,14 +78,18 @@ params1 = 1.2
 params2 = [3.4, 5.6]
 params_amp = [2.5, 0.9, 0.3]
 
-HAMILTONIANS_AND_PARAMS = [(H_i + drive(amplitude=4, phase=1, detuning=3, wires=[0, 1, 2]), []),
-                (H_i + drive(amplitude=amp, phase=1, detuning=2, wires=[0, 1, 2]), [params_amp]),
-                (H_i + drive(amplitude=2, phase=f1, detuning=2, wires=[0, 1, 2]), [params1]),
-                (H_i + drive(amplitude=amp, phase=1, detuning=f2, wires=[0, 1, 2]), [params_amp, params2]),
-                (H_i + drive(amplitude=4, phase=f2, detuning=f1, wires=[0, 1, 2]), [params2, params1]),
-                (H_i + drive(amplitude=amp, phase=f2, detuning=4, wires=[0, 1, 2]), [params_amp, params2]),
-                (H_i + drive(amplitude=amp, phase=f2, detuning=f1, wires=[0, 1, 2]), [params_amp, params2, params1])
-                ]
+HAMILTONIANS_AND_PARAMS = [
+    (H_i + drive(amplitude=4, phase=1, detuning=3, wires=[0, 1, 2]), []),
+    (H_i + drive(amplitude=amp, phase=1, detuning=2, wires=[0, 1, 2]), [params_amp]),
+    (H_i + drive(amplitude=2, phase=f1, detuning=2, wires=[0, 1, 2]), [params1]),
+    (H_i + drive(amplitude=amp, phase=1, detuning=f2, wires=[0, 1, 2]), [params_amp, params2]),
+    (H_i + drive(amplitude=4, phase=f2, detuning=f1, wires=[0, 1, 2]), [params2, params1]),
+    (H_i + drive(amplitude=amp, phase=f2, detuning=4, wires=[0, 1, 2]), [params_amp, params2]),
+    (
+        H_i + drive(amplitude=amp, phase=f2, detuning=f1, wires=[0, 1, 2]),
+        [params_amp, params2, params1],
+    ),
+]
 
 
 DEV_ATTRIBUTES = [(BraketLocalAquilaDevice, "RydbergAtomSimulator", "braket.local.aquila")]
@@ -175,12 +179,13 @@ class TestBraketAhsDevice:
     def test_settings(self):
         dev = dev_sim
         assert isinstance(dev.settings, dict)
-        assert 'interaction_coeff' in dev.settings.keys()
+        assert "interaction_coeff" in dev.settings.keys()
         assert len(dev.settings.keys()) == 1
-        assert dev.settings['interaction_coeff'] == 862690
+        assert dev.settings["interaction_coeff"] == 862690
 
-    @pytest.mark.parametrize("dev_cls, shots", [(BraketLocalAquilaDevice, 1000),
-                                                (BraketLocalAquilaDevice, 2)])
+    @pytest.mark.parametrize(
+        "dev_cls, shots", [(BraketLocalAquilaDevice, 1000), (BraketLocalAquilaDevice, 2)]
+    )
     def test_setting_shots(self, dev_cls, shots):
         """Test that setting shots changes number of shots from default (100)"""
         dev = dev_cls(wires=3, shots=shots)
@@ -478,10 +483,15 @@ class TestBraketAhsDevice:
         assert ts.times() == times_s
         assert ts.values() == expected_vals
 
-    @pytest.mark.parametrize("pulse", [HardwarePulse(1, 2, sin_fn, wires=[0, 1, 2]),
-                                       HardwarePulse(cos_fn, 1.7, 2.3, wires=[0, 1, 2]),
-                                       HardwarePulse(3.8, lin_fn, 1.9, wires=[0, 1, 2]),
-                                       HardwarePulse(lin_fn, sin_fn, quad_fn, wires=[0, 1, 2])])
+    @pytest.mark.parametrize(
+        "pulse",
+        [
+            HardwarePulse(1, 2, sin_fn, wires=[0, 1, 2]),
+            HardwarePulse(cos_fn, 1.7, 2.3, wires=[0, 1, 2]),
+            HardwarePulse(3.8, lin_fn, 1.9, wires=[0, 1, 2]),
+            HardwarePulse(lin_fn, sin_fn, quad_fn, wires=[0, 1, 2]),
+        ],
+    )
     def test_convert_pulse_to_driving_field(self, pulse):
         """Test that a time interval in microseconds (as passed to the qnode in PennyLane)
         and a Pulse object containing constant or time-dependent pulse parameters (floats
@@ -508,37 +518,51 @@ class TestBraketAhsDevice:
 class TestLocalAquilaDevice:
     """Test functionality specific to the local simulator device"""
 
-    def test_validate_operations_multiple_global_drive_terms(self):
-        """Test that an error is raised if there are multiple drive terms on
-        the Hamiltonian"""
-        pulses = [HardwarePulse(3, 4, 5, [0, 1, 2]), HardwarePulse(4, 6, 7, [1, 0, 2])]
-
-        with pytest.raises(ValueError, match="with multiple global drives"):
+    @pytest.mark.parametrize(
+        "pulses, error",
+        [
+            (
+                [HardwarePulse(3, 4, 5, [0, 1, 2]), HardwarePulse(4, 6, 7, [1, 0, 2])],
+                "ParametrizedEvolution with multiple global drives",
+            ),
+            (
+                [HardwarePulse(3, 4, 5, [3, 4])],
+                "which are not a subset of device wires",
+            ),
+            (
+                [HardwarePulse(3, 4, 5, [0])],
+                "does not apply a global driving field to all wires",
+            ),
+            (
+                [HardwarePulse(3, 4, 5, [0]), HardwarePulse(3, 4, 5, [0, 1, 2])],
+                "Amplitude must be zero.",
+            ),
+            (
+                [HardwarePulse(3, 4, 5, [0]), HardwarePulse(f1, 4, 5, [0, 1, 2])],
+                "Amplitude must be zero.",
+            ),
+            (
+                [
+                    HardwarePulse(3, 4, 5, [0, 1, 2]),
+                    HardwarePulse(0, 0, f1, [0]),
+                    HardwarePulse(0, 0, 2, [0]),
+                ],
+                "All local drives must have the same shape.",
+            ),
+            (
+                [
+                    HardwarePulse(3, 4, 5, [0, 1, 2]),
+                    HardwarePulse(0, 0, 2, [0, 1]),
+                    HardwarePulse(0, 0, 4, [0, 2]),
+                ],
+                "Local drives must not have overlapping wires.",
+            ),
+        ],
+    )
+    def test_invalid_pulses(self, pulses, error):
+        """Test that invalid pulses raise the correct errors during validation"""
+        with pytest.raises(ValueError, match=error):
             dev_sim._validate_pulses(pulses)
-
-    @pytest.mark.parametrize("pulse_wires, dev_wires, res", [([0, 1, 2], [0, 1, 2, 3], 'error_sub'),  # subset
-                                                             ([5, 6, 7, 8, 9], [4, 5, 6, 7, 8], 'error_mis'),  # mismatch
-                                                             ([0, 1, 2, 3, 6], [1, 2, 3], 'error_mis'),
-                                                             ([0, 1, 2], [0, 1, 2], 'success')])
-    def test_validate_pulse_is_global_drive(self, pulse_wires, dev_wires, res):
-        """Test that an error is raised if the pulse does not describe a global drive"""
-
-        dev = BraketLocalAquilaDevice(wires=dev_wires)
-        pulse = HardwarePulse(3, 4, 5, pulse_wires)
-
-        if res == "error_sub":
-            with pytest.raises(
-                ValueError,
-                match="does not define a driving field that applies to all wires"
-            ):
-                dev._validate_pulses([pulse])
-        elif res == "error_mis":
-            with pytest.raises(
-                ValueError, match="which are not a subset of device wires"
-            ):
-                dev._validate_pulses([pulse])
-        else:
-            dev._validate_pulses([pulse])
 
     def test_run_task(self):
         ahs_program = dummy_ahs_program()
