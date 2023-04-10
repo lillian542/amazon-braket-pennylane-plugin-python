@@ -14,7 +14,7 @@
 import pytest
 import warnings
 
-from braket.pennylane_plugin.ahs_device import BraketAquilaDevice, BraketLocalAquilaDevice
+from braket.pennylane_plugin.ahs_device import BraketAwsAhsDevice, BraketLocalAhsDevice
 from braket.ahs.analog_hamiltonian_simulation import AnalogHamiltonianSimulation
 from braket.timings.time_series import TimeSeries
 from braket.ahs.driving_field import DrivingField
@@ -86,10 +86,10 @@ HAMILTONIANS_AND_PARAMS = [(H_i + rydberg_drive(amplitude=4, phase=1, detuning=3
                 ]
 
 
-DEV_ATTRIBUTES = [(BraketAquilaDevice, "Aquila", "braket.aws.aquila"),
-                  (BraketLocalAquilaDevice, "RydbergAtomSimulator", "braket.local.aquila")]
+DEV_ATTRIBUTES = [(BraketAwsAhsDevice, "Aquila", "braket.aws.aquila"),
+                  (BraketLocalAhsDevice, "RydbergAtomSimulator", "braket.local.aquila")]
 
-dev_sim = BraketLocalAquilaDevice(wires=3, shots=17)
+dev_sim = BraketLocalAhsDevice(wires=3, shots=17)
 
 
 def dummy_ahs_program():
@@ -169,8 +169,8 @@ class TestBraketAhsDevice:
         assert len(dev.settings.keys()) == 1
         assert dev.settings['interaction_coeff'] == 862690
 
-    @pytest.mark.parametrize("dev_cls, shots", [(BraketLocalAquilaDevice, 1000),
-                                                (BraketLocalAquilaDevice, 2)])
+    @pytest.mark.parametrize("dev_cls, shots", [(BraketLocalAhsDevice, 1000),
+                                                (BraketLocalAhsDevice, 2)])
     def test_setting_shots(self, dev_cls, shots):
         """Test that setting shots changes number of shots from default (100)"""
         dev = dev_cls(wires=3, shots=shots)
@@ -180,12 +180,12 @@ class TestBraketAhsDevice:
     def test_no_shots_raises_error(self, shots):
         """Test that an error is raised if shots are set to 0 or None"""
         with pytest.raises(RuntimeError, match="This device requires shots"):
-            BraketLocalAquilaDevice(wires=3, shots=shots)
+            BraketLocalAhsDevice(wires=3, shots=shots)
 
-    @pytest.mark.parametrize("dev_cls, wires", [(BraketLocalAquilaDevice, 2),
-                                                (BraketLocalAquilaDevice, [0, 2, 4]),
-                                                (BraketLocalAquilaDevice, [0, 'a', 7]),
-                                                (BraketLocalAquilaDevice, 7)])
+    @pytest.mark.parametrize("dev_cls, wires", [(BraketLocalAhsDevice, 2),
+                                                (BraketLocalAhsDevice, [0, 2, 4]),
+                                                (BraketLocalAhsDevice, [0, 'a', 7]),
+                                                (BraketLocalAhsDevice, 7)])
     def test_setting_wires(self, dev_cls, wires):
         """Test setting wires"""
         dev = dev_cls(wires=wires)
@@ -202,7 +202,7 @@ class TestBraketAhsDevice:
         """Test that apply creates and saves an ahs_program and samples as expected"""
         t = 0.4
         operations = [ParametrizedEvolution(hamiltonian, params, t)]
-        dev = BraketLocalAquilaDevice(wires=operations[0].wires)
+        dev = BraketLocalAhsDevice(wires=operations[0].wires)
 
         assert dev.samples is None
         assert dev.ahs_program is None
@@ -229,7 +229,7 @@ class TestBraketAhsDevice:
         evolution operator and store it on the device"""
 
         evolution = ParametrizedEvolution(hamiltonian, params, 1.5)
-        dev = BraketLocalAquilaDevice(wires=3)
+        dev = BraketLocalAhsDevice(wires=3)
 
         assert dev.ahs_program is None
 
@@ -286,8 +286,8 @@ class TestBraketAhsDevice:
         don't match the wires on the device."""
         H = H_i + drive(3, 2, 2, wires=[0, 1, 2])
 
-        dev1 = BraketLocalAquilaDevice(wires=len(H.wires)-1)
-        dev2 = BraketLocalAquilaDevice(wires=len(H.wires)+1)
+        dev1 = BraketLocalAhsDevice(wires=len(H.wires)-1)
+        dev2 = BraketLocalAhsDevice(wires=len(H.wires)+1)
 
         with pytest.raises(RuntimeError, match="Device wires must match wires of the evolution."):
             dev1._validate_operations([ParametrizedEvolution(H, [], 1)])
@@ -304,7 +304,7 @@ class TestBraketAhsDevice:
         H = H_i + drive(3, 2, 2, wires=3)
 
         # device wires [0, 1, 2, 3] match overall wires, but not length of register
-        dev = BraketLocalAquilaDevice(wires=4)
+        dev = BraketLocalAhsDevice(wires=4)
 
         with pytest.raises(RuntimeError, match="The defined interaction term has register"):
             dev._validate_operations([ParametrizedEvolution(H, [], 1)])
@@ -331,7 +331,7 @@ class TestBraketAhsDevice:
         """Test that an AtomArrangement with the expected coordinates is created
         and stored on the device"""
 
-        dev = BraketLocalAquilaDevice(wires=len(coordinates))
+        dev = BraketLocalAhsDevice(wires=len(coordinates))
         
         assert dev.register is None
 
