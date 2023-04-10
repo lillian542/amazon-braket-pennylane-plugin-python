@@ -22,21 +22,20 @@ import pytest
 from braket.ahs.analog_hamiltonian_simulation import AnalogHamiltonianSimulation
 from braket.ahs.atom_arrangement import AtomArrangement
 from braket.ahs.driving_field import DrivingField
+from braket.ahs.pattern import Pattern
+from braket.ahs.shifting_field import ShiftingField
 from braket.tasks.analog_hamiltonian_simulation_quantum_task_result import ShotResult
 from braket.tasks.local_quantum_task import LocalQuantumTask
 from braket.timings.time_series import TimeSeries
 
-import pennylane as qml
-import numpy as np
-
 from pennylane.pulse.parametrized_evolution import ParametrizedEvolution
-from pennylane.pulse.rydberg import rydberg_interaction
+from pennylane.pulse.rydberg import rydberg_interaction, rydberg_drive
 from pennylane.pulse.hardware_hamiltonian import HardwareHamiltonian, HardwarePulse, drive
 
 from dataclasses import dataclass
 from functools import partial
 
-from braket.pennylane_plugin.ahs_device import BraketLocalAquilaDevice
+from braket.pennylane_plugin.ahs_device import BraketAhsDevice, BraketLocalAquilaDevice
 
 coordinates1 = [[0, 0], [0, 5], [5, 0], [10, 5], [5, 10], [10, 10]]
 wires1 = [1, 6, 0, 2, 4, 3]
@@ -246,8 +245,11 @@ class TestBraketAhsDevice:
         """Test that we can create an AnalogueHamiltonianSimulation from an
         evolution operator and store it on the device"""
 
+        class MockAhsDevice(BraketAhsDevice):
+            pass
+
         evolution = ParametrizedEvolution(hamiltonian, params, 1.5)
-        dev = BraketLocalAquilaDevice(wires=3)
+        dev = MockAhsDevice(3, None)
 
         assert dev.ahs_program is None
 
@@ -572,3 +574,115 @@ class TestLocalAquilaDevice:
         assert isinstance(task, LocalQuantumTask)
         assert len(task.result().measurements) == 17  # dev_sim takes 17 shots
         assert isinstance(task.result().measurements[0], ShotResult)
+
+    def dummy_cfunc(t):
+        "Dummy function for testing local detunings"
+        return 10
+
+    @pytest.mark.parametrize(
+        "pulses, expected_detunings",
+        [
+            ([HardwarePulse(0, 0, 2, [0, 1]), HardwarePulse(4, 3, 2, [0, 1, 2])], [2, 2, 0]),
+            (
+                [
+                    HardwarePulse(0, 0, dummy_cfunc, [0]),
+                    HardwarePulse(4, 3, 2, [0, 1, 2]),
+                    HardwarePulse(0, 0, dummy_cfunc, [1, 2]),
+                ],
+                [dummy_cfunc, dummy_cfunc, dummy_cfunc],
+            ),
+            (
+                [
+                    HardwarePulse(0, 0, 4, [0]),
+                    HardwarePulse(4, 3, 2, [0, 1, 2]),
+                    HardwarePulse(0, 0, 2, [1, 2]),
+                ],
+                [4, 2, 2],
+            ),
+            (
+                [HardwarePulse(0, 0, dummy_cfunc, [0, 1]), HardwarePulse(4, 3, 2, [0, 1, 2])],
+                [dummy_cfunc, dummy_cfunc, lambda t: 0],
+            ),
+        ],
+    )
+    def test_create_valid_local_detunings(self, pulses, expected_detunings):
+        """Test that BraketLocalAquilaDevice._create_valid_local_detunings works
+        as expected."""
+        dev = BraketLocalAquilaDevice(wires=3)
+        dev._global_pulse = 1
+        detunings = dev._create_valid_local_detunings()
+
+        assert len(detunings) == len(dev.wires)
+
+        if callable(pulses[0].frequency):
+            for det, expected_det in zip(detunings, expected_detunings):
+                for i in range(10):
+                    assert det(i) == expected_det(i)
+        else:
+            assert all(detunings[i] == expected_detunings[i] for i in range(dev.wires))
+
+    def test_extract_pattern_from_detunings_invalid_detuning(self):
+        """Test that an error is raised when the shapes of the local detunings
+        don't match."""
+        detunings = [lambda t: np.sin(t), lambda t: np.cos(t)]
+        time_interval = [0, 20]
+
+        with pytest.raises(ValueError, match="Local detunings don't match"):
+            _ = dev_sim._extract_pattern_from_detunings(detunings, time_interval)
+
+    @pytest.mark.parametrize(
+        "detunings, expected_max, expected_pattern",
+        [
+            ([3, 2, 1], 3, [1, 2 / 3, 1 / 3]),
+            ([lambda t: 2, dummy_cfunc, lambda t: 0], dummy_cfunc, [0.2, 1, 0]),
+            (
+                [sin_fn, lambda t: 0.5 * np.sin(t), lambda t: 0.333 * np.sin(t)],
+                sin_fn,
+                [1, 0.5, 0.333],
+            ),
+        ],
+    )
+    def test_extract_pattern_from_detunings(self, detunings, expected_max, expected_pattern):
+        """Test that BraketLocalAquilaDevice._extract_pattern_from_detunings
+        works as expected."""
+        max_detuning, pattern = dev_sim._extract_pattern_from_detunings(detunings, [0, 20])
+
+        assert max_detuning == expected_max
+        assert isinstance(pattern, Pattern)
+        assert np.allclose(pattern.series, expected_pattern)
+
+    @pytest.mark.parametrize("detuning, pattern", [(sin_fn, [0.2, 0.2, 1]), (10.5, [0.1, 0.89, 1])])
+    def test_convert_pulses_to_shifting_field(self, detuning, pattern):
+        """Test that BraketLocalAquilaDevice._convert_pulses_to_shifting_field
+        works as expected."""
+        shift = dev_sim._convert_pulses_to_shifting_field(detuning, Pattern(pattern), [0, 20])
+        assert isinstance(shift, ShiftingField)
+
+    @pytest.mark.parametrize("hamiltonian, params", HAMILTONIANS_AND_PARAMS)
+    @pytest.mark.parametrize(
+        "local_detuning, local_params, local_wires", [(f1, [0.5], [0, 1]), (4.5, [], [0, 2])]
+    )
+    def test_create_ahs_program(
+        self, hamiltonian, params, local_detuning, local_params, local_wires
+    ):
+        """Test that BraketLocalAquilaDevice.create_ahs_program works as expected."""
+        local_term = rydberg_drive(0, 0, local_detuning, local_wires)
+        evolution = ParametrizedEvolution(hamiltonian + local_term, params + local_params, 1.5)
+        dev = BraketLocalAquilaDevice(3)
+
+        assert dev.ahs_program is None
+
+        ahs_program = dev.create_ahs_program(evolution)
+
+        # AHS program is created and stored on the device
+        assert isinstance(dev.ahs_program, AnalogHamiltonianSimulation)
+
+        # compare evolution and ahs_program registers
+        assert ahs_program.register.coordinate_list(0) == [
+            c[0] * 1e-6 for c in evolution.H.register
+        ]
+        assert ahs_program.register.coordinate_list(1) == [
+            c[1] * 1e-6 for c in evolution.H.register
+        ]
+
+        # elements of the hamiltonian have the expected shape
