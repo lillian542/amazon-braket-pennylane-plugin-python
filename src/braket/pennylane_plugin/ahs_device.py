@@ -168,7 +168,7 @@ class BraketAhsDevice(QubitDevice):
         if len(operations) > 1:
             raise NotImplementedError(
                 f"Support for multiple ParametrizedEvolution operators in a single circuit is "
-                f"not yet implemented. Recieved {len(operations)} operators."
+                f"not yet implemented. Received {len(operations)} operators."
             )
 
         ev_op = operations[0]  # only one!
@@ -208,7 +208,7 @@ class BraketAhsDevice(QubitDevice):
         if len(pulses) > 1:
             raise NotImplementedError(
                 f"Multiple pulses in a Hamiltonian are not currently supported. "
-                f"Recieved {len(pulses)} pulses."
+                f"Received {len(pulses)} pulses."
             )
 
         if pulses[0].wires != self.wires:
