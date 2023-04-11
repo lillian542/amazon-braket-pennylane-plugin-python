@@ -11,7 +11,6 @@
 # ANY KIND, either express or implied. See the License for the specific
 # language governing permissions and limitations under the License.
 
-import pytest
 import warnings
 from dataclasses import dataclass
 from functools import partial
@@ -27,13 +26,9 @@ from braket.ahs.shifting_field import ShiftingField
 from braket.tasks.analog_hamiltonian_simulation_quantum_task_result import ShotResult
 from braket.tasks.local_quantum_task import LocalQuantumTask
 from braket.timings.time_series import TimeSeries
-
+from pennylane.pulse.hardware_hamiltonian import HardwareHamiltonian, HardwarePulse
 from pennylane.pulse.parametrized_evolution import ParametrizedEvolution
-from pennylane.pulse.rydberg import rydberg_interaction, rydberg_drive
-from pennylane.pulse.hardware_hamiltonian import HardwareHamiltonian, HardwarePulse, drive
-
-from dataclasses import dataclass
-from functools import partial
+from pennylane.pulse.rydberg import rydberg_drive, rydberg_interaction
 
 from braket.pennylane_plugin.ahs_device import BraketAhsDevice, BraketLocalAquilaDevice
 
@@ -78,20 +73,31 @@ params2 = [3.4, 5.6]
 params_amp = [2.5, 0.9, 0.3]
 
 HAMILTONIANS_AND_PARAMS = [
-    (H_i + drive(amplitude=4, phase=1, detuning=3, wires=[0, 1, 2]), []),
-    (H_i + drive(amplitude=amp, phase=1, detuning=2, wires=[0, 1, 2]), [params_amp]),
-    (H_i + drive(amplitude=2, phase=f1, detuning=2, wires=[0, 1, 2]), [params1]),
-    (H_i + drive(amplitude=amp, phase=1, detuning=f2, wires=[0, 1, 2]), [params_amp, params2]),
-    (H_i + drive(amplitude=4, phase=f2, detuning=f1, wires=[0, 1, 2]), [params2, params1]),
-    (H_i + drive(amplitude=amp, phase=f2, detuning=4, wires=[0, 1, 2]), [params_amp, params2]),
+    (H_i + rydberg_drive(amplitude=4, phase=1, detuning=3, wires=[0, 1, 2]), []),
+    (H_i + rydberg_drive(amplitude=amp, phase=1, detuning=2, wires=[0, 1, 2]), [params_amp]),
+    (H_i + rydberg_drive(amplitude=2, phase=f1, detuning=2, wires=[0, 1, 2]), [params1]),
     (
-        H_i + drive(amplitude=amp, phase=f2, detuning=f1, wires=[0, 1, 2]),
+        H_i + rydberg_drive(amplitude=amp, phase=1, detuning=f2, wires=[0, 1, 2]),
+        [params_amp, params2],
+    ),
+    (H_i + rydberg_drive(amplitude=4, phase=f2, detuning=f1, wires=[0, 1, 2]), [params2, params1]),
+    (
+        H_i + rydberg_drive(amplitude=amp, phase=f2, detuning=4, wires=[0, 1, 2]),
+        [params_amp, params2],
+    ),
+    (
+        H_i + rydberg_drive(amplitude=amp, phase=f2, detuning=f1, wires=[0, 1, 2]),
         [params_amp, params2, params1],
     ),
 ]
 
 
 DEV_ATTRIBUTES = [(BraketLocalAquilaDevice, "RydbergAtomSimulator", "braket.local.aquila")]
+
+
+class MockAhsDevice(BraketAhsDevice):
+    short_name = "braket.mock.device"
+
 
 dev_sim = BraketLocalAquilaDevice(wires=3, shots=17)
 
@@ -245,9 +251,6 @@ class TestBraketAhsDevice:
         """Test that we can create an AnalogueHamiltonianSimulation from an
         evolution operator and store it on the device"""
 
-        class MockAhsDevice(BraketAhsDevice):
-            pass
-
         evolution = ParametrizedEvolution(hamiltonian, params, 1.5)
         dev = MockAhsDevice(3, None)
 
@@ -260,10 +263,10 @@ class TestBraketAhsDevice:
 
         # compare evolution and ahs_program registers
         assert ahs_program.register.coordinate_list(0) == [
-            c[0] * 1e-6 for c in evolution.H.register
+            c[0] * 1e-6 for c in evolution.H.settings.register
         ]
         assert ahs_program.register.coordinate_list(1) == [
-            c[1] * 1e-6 for c in evolution.H.register
+            c[1] * 1e-6 for c in evolution.H.settings.register
         ]
 
         # elements of the hamiltonian have the expected shape
@@ -298,7 +301,7 @@ class TestBraketAhsDevice:
     def test_validate_operations_multiple_operators(self):
         """Test that an error is raised if there are multiple operators"""
 
-        H1 = drive(amp, f1, 2, wires=[0, 1, 2])
+        H1 = rydberg_drive(amp, f1, 2, wires=[0, 1, 2])
         op1 = qml.evolve(H_i + H1)
         op2 = qml.evolve(H_i + H1)
 
@@ -310,7 +313,7 @@ class TestBraketAhsDevice:
     def test_validate_operations_wires_match_device(self):
         """Test that an error is raised if the wires on the Hamiltonian
         don't match the wires on the device."""
-        H = H_i + drive(3, 2, 2, wires=[0, 1, 2])
+        H = H_i + rydberg_drive(3, 2, 2, wires=[0, 1, 2])
 
         dev1 = BraketLocalAquilaDevice(wires=len(H.wires) - 1)
         dev2 = BraketLocalAquilaDevice(wires=len(H.wires) + 1)
@@ -327,7 +330,7 @@ class TestBraketAhsDevice:
 
         # register has wires [0, 1, 2], drive has wire [3]
         # creating a Hamiltonian like this in PL will raise a warning, but not an error
-        H = H_i + drive(3, 2, 2, wires=3)
+        H = H_i + rydberg_drive(3, 2, 2, wires=3)
 
         # device wires [0, 1, 2, 3] match overall wires, but not length of register
         dev = BraketLocalAquilaDevice(wires=4)
@@ -345,12 +348,29 @@ class TestBraketAhsDevice:
         with pytest.raises(RuntimeError, match="Expected a HardwareHamiltonian instance"):
             dev_sim._validate_operations([op1])
 
-    def test_validate_pulses_no_pulses(self):
+    @pytest.mark.parametrize(
+        "pulses, error, error_message",
+        [
+            ([], RuntimeError, "No pulses found in the ParametrizedEvolution"),
+            (
+                [HardwarePulse(1, 2, 3, [0]), HardwarePulse(4, 5, 6, [1])],
+                NotImplementedError,
+                "Multiple pulses in a Hamiltonian are not currently supported",
+            ),
+            (
+                [HardwarePulse(1, 2, 3, [0])],
+                NotImplementedError,
+                "Only global drive is currently supported",
+            ),
+        ],
+    )
+    def test_validate_pulses_invalid_pulses(self, pulses, error, error_message):
         """Test that _validate_pulses raises an error if there are no pulses saved
         on the Hamiltonian"""
+        dev = MockAhsDevice(3, None)
 
-        with pytest.raises(ValueError, match="does not define a driving field"):
-            dev_sim._validate_pulses(H_i.pulses)
+        with pytest.raises(error, match=error_message):
+            dev._validate_pulses(pulses)
 
     @pytest.mark.parametrize("coordinates", [coordinates1, coordinates2])
     def test_create_register(self, coordinates):
@@ -383,7 +403,7 @@ class TestBraketAhsDevice:
         # check which of initial pulse parameters are callable
         callable_amp = callable(pulse.amplitude)
         callable_phase = callable(pulse.phase)
-        callable_detuning = callable(pulse.detuning)
+        callable_detuning = callable(pulse.frequency)
 
         # get an expected value for each pulse parameter at t=1.7
         if callable_amp:
@@ -399,10 +419,10 @@ class TestBraketAhsDevice:
             phase_sample = pulse.phase
 
         if callable_detuning:
-            detuning_sample = pulse.detuning(params[idx], 1.7)
+            detuning_sample = pulse.frequency(params[idx], 1.7)
             idx += 1
         else:
-            detuning_sample = pulse.detuning
+            detuning_sample = pulse.frequency
 
         # evaluate pulses
         dev_sim._evaluate_pulses(ev_op)
@@ -422,10 +442,10 @@ class TestBraketAhsDevice:
             assert phase_sample == dev_sim.pulses[0].phase
 
         if callable_detuning:
-            assert isinstance(dev_sim.pulses[0].detuning, partial)
-            assert detuning_sample == dev_sim.pulses[0].detuning(1.7)
+            assert isinstance(dev_sim.pulses[0].frequency, partial)
+            assert detuning_sample == dev_sim.pulses[0].frequency(1.7)
         else:
-            assert detuning_sample == dev_sim.pulses[0].detuning
+            assert detuning_sample == dev_sim.pulses[0].frequency
 
     @pytest.mark.parametrize("time_interval", [[1.5, 2.3], [0, 1.2], [0.111, 3.789]])
     def test_get_sample_times(self, time_interval):
@@ -533,7 +553,7 @@ class TestLocalAquilaDevice:
             ),
             (
                 [HardwarePulse(3, 4, 5, [0])],
-                "does not apply a global driving field to all wires",
+                "doesn't apply a global driving field to all wires",
             ),
             (
                 [HardwarePulse(3, 4, 5, [0]), HardwarePulse(3, 4, 5, [0, 1, 2])],
@@ -610,6 +630,7 @@ class TestLocalAquilaDevice:
         as expected."""
         dev = BraketLocalAquilaDevice(wires=3)
         dev._global_pulse = 1
+        dev.pulses = pulses
         detunings = dev._create_valid_local_detunings()
 
         assert len(detunings) == len(dev.wires)
@@ -619,7 +640,7 @@ class TestLocalAquilaDevice:
                 for i in range(10):
                     assert det(i) == expected_det(i)
         else:
-            assert all(detunings[i] == expected_detunings[i] for i in range(dev.wires))
+            assert all(detunings[i] == expected_detunings[i] for i in range(len(dev.wires)))
 
     def test_extract_pattern_from_detunings_invalid_detuning(self):
         """Test that an error is raised when the shapes of the local detunings
@@ -660,18 +681,22 @@ class TestLocalAquilaDevice:
 
     @pytest.mark.parametrize("hamiltonian, params", HAMILTONIANS_AND_PARAMS)
     @pytest.mark.parametrize(
-        "local_detuning, local_params, local_wires", [(f1, [0.5], [0, 1]), (4.5, [], [0, 2])]
+        "local_detuning, local_params, local_wires", [(f1, [0.5], [0, 1]), (4.5, [], [1, 2]), (None, [], [])]
     )
     def test_create_ahs_program(
         self, hamiltonian, params, local_detuning, local_params, local_wires
     ):
         """Test that BraketLocalAquilaDevice.create_ahs_program works as expected."""
-        local_term = rydberg_drive(0, 0, local_detuning, local_wires)
-        evolution = ParametrizedEvolution(hamiltonian + local_term, params + local_params, 1.5)
+        if local_detuning is not None:
+            hamiltonian = hamiltonian + rydberg_drive(0, 0, local_detuning, local_wires)
+            params = params + local_params
+
+        evolution = ParametrizedEvolution(hamiltonian, params, 1.5)
         dev = BraketLocalAquilaDevice(3)
 
         assert dev.ahs_program is None
 
+        dev._validate_pulses(evolution.H.pulses)
         ahs_program = dev.create_ahs_program(evolution)
 
         # AHS program is created and stored on the device
@@ -679,10 +704,35 @@ class TestLocalAquilaDevice:
 
         # compare evolution and ahs_program registers
         assert ahs_program.register.coordinate_list(0) == [
-            c[0] * 1e-6 for c in evolution.H.register
+            c[0] * 1e-6 for c in evolution.H.settings.register
         ]
         assert ahs_program.register.coordinate_list(1) == [
-            c[1] * 1e-6 for c in evolution.H.register
+            c[1] * 1e-6 for c in evolution.H.settings.register
         ]
 
         # elements of the hamiltonian have the expected shape
+        h = ahs_program.hamiltonian
+
+        if local_detuning is None:
+            assert isinstance(h, DrivingField)
+            drive = h
+        else:
+            assert len(h.terms) == 2
+            drive, shift = h.terms
+            assert isinstance(drive, DrivingField)
+            assert isinstance(shift, ShiftingField)
+
+            expected_pattern = [1 if i in local_wires else 0 for i in dev.wires]
+            assert shift.magnitude.pattern.series == expected_pattern
+
+            local_det_time = shift.magnitude.time_series.times()
+            assert local_det_time[0] == evolution.t[0] * 1e-6
+            assert local_det_time[-1] == evolution.t[1] * 1e-6
+
+        amp_time = drive.amplitude.time_series.times()
+        phase_time = drive.phase.time_series.times()
+        det_time = drive.detuning.time_series.times()
+
+        assert amp_time == phase_time == det_time
+        assert amp_time[0] == evolution.t[0] * 1e-6
+        assert amp_time[-1] == evolution.t[1] * 1e-6

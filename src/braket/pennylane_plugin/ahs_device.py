@@ -32,25 +32,21 @@ Code details
 ~~~~~~~~~~~~
 """
 from functools import partial
-from typing import Iterable, Union, Optional
+from typing import Iterable, Optional, Union
+
 import numpy as np
-
-from pennylane import QubitDevice, math
-from pennylane._version import __version__
-from pennylane.pulse.hardware_hamiltonian import HardwarePulse, HardwareHamiltonian
-
-from braket.aws import AwsDevice, AwsSession, AwsQuantumTask
-from braket.devices import Device, LocalSimulator
-from braket.ahs.atom_arrangement import AtomArrangement
 from braket.ahs.analog_hamiltonian_simulation import AnalogHamiltonianSimulation
 from braket.ahs.atom_arrangement import AtomArrangement
 from braket.ahs.driving_field import DrivingField
 from braket.ahs.field import Field
 from braket.ahs.pattern import Pattern
 from braket.ahs.shifting_field import ShiftingField
-from braket.aws import AwsDevice
-from braket.devices import LocalSimulator
+from braket.aws import AwsDevice, AwsQuantumTask, AwsSession
+from braket.devices import Device, LocalSimulator
 from braket.timings.time_series import TimeSeries
+from pennylane import QubitDevice, math
+from pennylane._version import __version__
+from pennylane.pulse.hardware_hamiltonian import HardwareHamiltonian, HardwarePulse
 
 
 class BraketAhsDevice(QubitDevice):
@@ -464,16 +460,16 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
 
         time_interval = evolution.t
 
-        drive = self._convert_pulse_to_driving_field(self.pulses[self._global_pulse], time_interval)
+        H = self._convert_pulse_to_driving_field(self.pulses[self._global_pulse], time_interval)
 
         # Create local detunings
         local_detunings = self._create_valid_local_detunings()
-        detuning, pattern = self._extract_pattern_from_detunings(local_detunings, time_interval)
-        shift = self._convert_pulses_to_shifting_field(detuning, pattern, time_interval)
+        if local_detunings is not None:
+            detuning, pattern = self._extract_pattern_from_detunings(local_detunings, time_interval)
+            shift = self._convert_pulses_to_shifting_field(detuning, pattern, time_interval)
+            H = H + shift
 
-        H = drive + shift
         ahs_program = AnalogHamiltonianSimulation(register=self.register, hamiltonian=H)
-
         self.ahs_program = ahs_program
 
         return ahs_program
@@ -490,6 +486,8 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
         """
         local_pulses = self.pulses.copy()
         local_pulses.pop(self._global_pulse)
+        if len(local_pulses) == 0:
+            return None
 
         callable_detunings = callable(local_pulses[0].frequency)
         device_detunings = (
@@ -522,9 +520,9 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
             pattern = [det / max_detuning for det in detunings]
             return max_detuning, Pattern(pattern)
 
-        evaluated_detunings = [
+        evaluated_detunings = np.array([
             [float(detuning(t * 1e6)) for t in time_points] for detuning in detunings
-        ]
+        ])
         pattern = []
 
         # Find pattern if callable detuning
@@ -532,9 +530,12 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
             time_slice = evaluated_detunings[:, i]
 
             if not np.allclose(time_slice, 0.0):
+                time_slice = np.abs(time_slice)
+
                 _max = np.amax(time_slice)
                 max_index = int(np.argmax(time_slice))
                 max_detuning = detunings[max_index]
+
                 pattern = [det / _max for det in time_slice]
                 break
 
@@ -546,7 +547,8 @@ class BraketLocalAquilaDevice(BraketAhsDevice):
         # Validate that detunings follow pattern along all time steps
         for i, t in enumerate(time_points):
             time_slice = evaluated_detunings[:, i]
-            new_time_slice = [p * float(max_detuning(t)) for p in pattern]
+            
+            new_time_slice = [p * float(max_detuning(t * 1e6)) for p in pattern]
             if not np.allclose(time_slice, new_time_slice):
                 raise ValueError(
                     "Local detunings don't match. Make sure that all local detunings match "

@@ -18,10 +18,9 @@ import pennylane as qml
 import pkg_resources
 import pytest
 from conftest import shortname_and_backends
-
+from pennylane.pulse.hardware_hamiltonian import HardwarePulse, drive
 from pennylane.pulse.parametrized_evolution import ParametrizedEvolution
 from pennylane.pulse.rydberg import rydberg_interaction
-from pennylane.pulse.hardware_hamiltonian import HardwarePulse, drive
 
 from braket.pennylane_plugin.ahs_device import BraketAquilaDevice, BraketLocalAquilaDevice
 
@@ -45,8 +44,7 @@ def f2(p, t):
 
 
 def amp(p, t):
-    return p[0] * np.exp(-(t-p[1])**2/(2*p[2]**2))
-
+    return p[0] * np.exp(-((t - p[1]) ** 2) / (2 * p[2] ** 2))
 
 
 params1 = 1.2
@@ -56,14 +54,15 @@ params_amp = [2.5, 0.9, 0.3]
 # Hamiltonians to be tested
 H_i = rydberg_interaction(coordinates)
 
-HAMILTONIANS_AND_PARAMS = [(H_i + drive(1, 2, 3, wires=[0, 1, 2]), []),
-                           (H_i + drive(amp, 1, 2, wires=[0, 1, 2]), [params_amp]),
-                           (H_i + drive(2, f1, 2, wires=[0, 1, 2]), [params1]),
-                           (H_i + drive(amp, 1, f2, wires=[0, 1, 2]), [params_amp, params2]),
-                           (H_i + drive(4, f2, f1, wires=[0, 1, 2]), [params2, params1]),
-                           (H_i + drive(amp, f2, 4, wires=[0, 1, 2]), [params_amp, params2]),
-                           (H_i + drive(amp, f2, f1, wires=[0, 1, 2]), [params_amp, params2, params1])
-                ]
+HAMILTONIANS_AND_PARAMS = [
+    (H_i + drive(1, 2, 3, wires=[0, 1, 2]), []),
+    (H_i + drive(amp, 1, 2, wires=[0, 1, 2]), [params_amp]),
+    (H_i + drive(2, f1, 2, wires=[0, 1, 2]), [params1]),
+    (H_i + drive(amp, 1, f2, wires=[0, 1, 2]), [params_amp, params2]),
+    (H_i + drive(4, f2, f1, wires=[0, 1, 2]), [params2, params1]),
+    (H_i + drive(amp, f2, 4, wires=[0, 1, 2]), [params_amp, params2]),
+    (H_i + drive(amp, f2, f1, wires=[0, 1, 2]), [params_amp, params2, params1]),
+]
 
 
 class TestBraketAquilaDevice:
@@ -85,7 +84,10 @@ class TestBraketAquilaDevice:
         dev = BraketAquilaDevice(wires=3)
         pulses = [HardwarePulse(3, 4, 5, [0, 1]), HardwarePulse(4, 6, 7, [1, 2])]
 
-        with pytest.raises(NotImplementedError, match="Multiple pulses in a Hamiltonian are not currently supported"):
+        with pytest.raises(
+            NotImplementedError,
+            match="Multiple pulses in a Hamiltonian are not currently supported",
+        ):
             dev._validate_pulses(pulses)
 
     @pytest.mark.parametrize(
