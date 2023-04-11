@@ -12,12 +12,18 @@
 # language governing permissions and limitations under the License.
 
 from setuptools import find_namespace_packages, setup
+import platform
 
 with open("README.rst", "r") as fh:
     long_description = fh.read()
 
 with open("src/braket/pennylane_plugin/_version.py") as f:
     version = f.readlines()[-1].split()[-1].strip("\"'")
+
+if platform.system() == "Darwin" and platform.machine() == "arm64":
+    TF_VERSION = "tensorflow-macos>=2.6.0"
+else:
+    TF_VERSION = "tensorflow>=2.6.0"
 
 setup(
     name="amazon-braket-pennylane-plugin",
@@ -29,7 +35,7 @@ setup(
     install_requires=[
         "amazon-braket-sdk>=1.35.0",
         # "pennylane=0.30.0"
-        "pennylane @ git+https://github.com/PennyLaneAI/pennylane.git",
+        "pennylane @ git+https://github.com/PennyLaneAI/pennylane.git@rydberg-drive",
     ],
     entry_points={
         "pennylane.plugins": [
@@ -62,8 +68,8 @@ setup(
             "sphinx-rtd-theme",
             "sphinxcontrib-apidoc",
             "tox",
-            "tensorflow>=2.6.0",
             "torch>=1.11",
+            TF_VERSION,
         ]
     },
     url="https://github.com/aws/amazon-braket-pennylane-plugin-python",
