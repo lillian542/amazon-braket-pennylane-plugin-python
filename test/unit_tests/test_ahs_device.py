@@ -758,6 +758,7 @@ class TestLocalAhsDevice:
         assert amp_time[0] == evolution.t[0] * 1e-6
         assert amp_time[-1] == evolution.t[1] * 1e-6
 
+
 class TestBraketAwsAhsDevice:
     """Test functionality specific to the hardware device"""
 
