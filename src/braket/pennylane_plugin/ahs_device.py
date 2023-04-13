@@ -43,8 +43,8 @@ from braket.aws import AwsDevice, AwsSession, AwsQuantumTask
 from braket.devices import Device, LocalSimulator
 from braket.ahs.atom_arrangement import AtomArrangement
 from braket.ahs.shifting_field import ShiftingField
-from braket.ahs.Pattern import Pattern
-from braket.ahs.Field import Field
+from braket.ahs.pattern import Pattern
+from braket.ahs.field import Field
 from braket.ahs.analog_hamiltonian_simulation import AnalogHamiltonianSimulation
 from braket.ahs.driving_field import DrivingField
 from braket.timings.time_series import TimeSeries

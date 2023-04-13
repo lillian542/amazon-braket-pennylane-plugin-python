@@ -309,6 +309,7 @@ class TestBraketAhsDevice:
 
         assert dev.ahs_program is None
 
+        dev._validate_pulses(evolution.H.pulses)
         ahs_program = dev.create_ahs_program(evolution)
 
         # AHS program is created and stored on the device
@@ -395,12 +396,13 @@ class TestBraketAhsDevice:
         with pytest.raises(RuntimeError, match="Expected a HardwareHamiltonian instance"):
             dev_sim._validate_operations([op1])
 
-    def test_validate_pulses_no_pulses(self):
+    def test_validate_pulses_no_pulses(self, mock_aws_device):
         """Test that _validate_pulses raises an error if there are no pulses saved
         on the Hamiltonian"""
+        dev = mock_aws_device()
 
         with pytest.raises(RuntimeError, match="No pulses found"):
-            dev_sim._validate_pulses(H_i.pulses)
+            dev._validate_pulses(H_i.pulses)
 
     @pytest.mark.parametrize("coordinates", [coordinates1, coordinates2])
     def test_create_register(self, coordinates):
