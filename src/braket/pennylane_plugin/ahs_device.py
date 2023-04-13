@@ -512,7 +512,7 @@ class BraketLocalAhsDevice(BraketAhsDevice):
         """
         return {"interaction_coeff": 862690}  # C6 for the Rubidium transition used by the simulator, MHz x um^6
 
-    def create_ahs_program(self, evolution):
+    def _ahs_program_from_evolution(self, evolution):
         """Create AHS program for simulation from a ParametrizedEvolution
 
         Args:
@@ -521,7 +521,7 @@ class BraketLocalAhsDevice(BraketAhsDevice):
 
         Returns:
             AnalogHamiltonianSimulation: a program containing the register and drive
-                information for running an AHS task on simulation or hardware"""
+                information for running an AHS task on simulation.ß"""
 
         # sets self.pulses to be the evaluated pulses (now only a function of time)
         self._evaluate_pulses(evolution)
@@ -539,7 +539,6 @@ class BraketLocalAhsDevice(BraketAhsDevice):
             H = H + shift
 
         ahs_program = AnalogHamiltonianSimulation(register=self.register, hamiltonian=H)
-        self.ahs_program = ahs_program
 
         return ahs_program
 

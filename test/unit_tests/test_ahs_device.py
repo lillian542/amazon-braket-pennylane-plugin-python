@@ -557,7 +557,7 @@ class TestBraketAhsDevice:
         assert np.allclose(output, expected_output, equal_nan=True)
 
 
-class TestLocalAquilaDevice:
+class TestLocalAhsDevice:
     """Test functionality specific to the local simulator device"""
 
     @pytest.mark.parametrize(
@@ -615,6 +615,7 @@ class TestLocalAquilaDevice:
         assert len(task.result().measurements) == 17  # dev_sim takes 17 shots
         assert isinstance(task.result().measurements[0], ShotResult)
 
+    @staticmethod
     def dummy_cfunc(t):
         "Dummy function for testing local detunings"
         return 10
@@ -646,7 +647,7 @@ class TestLocalAquilaDevice:
         ],
     )
     def test_create_valid_local_detunings(self, pulses, expected_detunings):
-        """Test that BraketLocalAquilaDevice._create_valid_local_detunings works
+        """Test that BraketLocalAhsDevice._create_valid_local_detunings works
         as expected."""
         dev = BraketLocalAhsDevice(wires=3)
         dev._global_pulse = 1
@@ -684,7 +685,7 @@ class TestLocalAquilaDevice:
         ],
     )
     def test_extract_pattern_from_detunings(self, detunings, expected_max, expected_pattern):
-        """Test that BraketLocalAquilaDevice._extract_pattern_from_detunings
+        """Test that BraketLocalAhsDevice._extract_pattern_from_detunings
         works as expected."""
         max_detuning, pattern = dev_sim._extract_pattern_from_detunings(detunings, [0, 20])
 
@@ -694,7 +695,7 @@ class TestLocalAquilaDevice:
 
     @pytest.mark.parametrize("detuning, pattern", [(sin_fn, [0.2, 0.2, 1]), (10.5, [0.1, 0.89, 1])])
     def test_convert_pulses_to_shifting_field(self, detuning, pattern):
-        """Test that BraketLocalAquilaDevice._convert_pulses_to_shifting_field
+        """Test that BraketLocalAhsDevice._convert_pulses_to_shifting_field
         works as expected."""
         shift = dev_sim._convert_pulses_to_shifting_field(detuning, Pattern(pattern), [0, 20])
         assert isinstance(shift, ShiftingField)
@@ -703,10 +704,10 @@ class TestLocalAquilaDevice:
     @pytest.mark.parametrize(
         "local_detuning, local_params, local_wires", [(f1, [0.5], [0, 1]), (4.5, [], [1, 2]), (None, [], [])]
     )
-    def test_create_ahs_program(
+    def test_ahs_program_from_evolution(
         self, hamiltonian, params, local_detuning, local_params, local_wires
     ):
-        """Test that BraketLocalAquilaDevice.create_ahs_program works as expected."""
+        """Test that BraketLocalAhsDevice.create_ahs_program works as expected."""
         if local_detuning is not None:
             hamiltonian = hamiltonian + rydberg_drive(0, 0, local_detuning, local_wires)
             params = params + local_params
@@ -714,14 +715,11 @@ class TestLocalAquilaDevice:
         evolution = ParametrizedEvolution(hamiltonian, params, 1.5)
         dev = BraketLocalAhsDevice(3)
 
-        assert dev.ahs_program is None
-
         dev._validate_pulses(evolution.H.pulses)
 
-        ahs_program = dev.create_ahs_program(evolution)
+        ahs_program = dev._ahs_program_from_evolution(evolution)
 
-        # AHS program is created and stored on the device
-        assert isinstance(dev.ahs_program, AnalogHamiltonianSimulation)
+        assert isinstance(ahs_program, AnalogHamiltonianSimulation)
 
         # compare evolution and ahs_program registers
         assert ahs_program.register.coordinate_list(0) == [
