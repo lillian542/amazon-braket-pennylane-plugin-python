@@ -37,7 +37,7 @@ from braket.timings.time_series import TimeSeries
 
 from pennylane.pulse.parametrized_evolution import ParametrizedEvolution
 from pennylane.pulse.rydberg import rydberg_interaction, rydberg_drive
-from pennylane.pulse.hardware_hamiltonian import HardwarePulse, drive
+from pennylane.pulse.hardware_hamiltonian import HardwarePulse
 
 from dataclasses import dataclass
 from functools import partial
@@ -315,8 +315,8 @@ class TestBraketAhsDevice:
         assert isinstance(dev.ahs_program, AnalogHamiltonianSimulation)
 
         # compare evolution and ahs_program registers
-        assert ahs_program.register.coordinate_list(0) == [c[0] * 1e-6 for c in evolution.H.register]
-        assert ahs_program.register.coordinate_list(1) == [c[1] * 1e-6 for c in evolution.H.register]
+        assert ahs_program.register.coordinate_list(0) == [c[0] * 1e-6 for c in evolution.H.settings.register]
+        assert ahs_program.register.coordinate_list(1) == [c[1] * 1e-6 for c in evolution.H.settings.register]
 
         # elements of the hamiltonian have the expected shape
         h = ahs_program.hamiltonian
@@ -350,7 +350,7 @@ class TestBraketAhsDevice:
     def test_validate_operations_multiple_operators(self):
         """Test that an error is raised if there are multiple operators"""
 
-        H1 = drive(amp, f1, 2, wires=[0, 1, 2])
+        H1 = rydberg_drive(amp, f1, 2, wires=[0, 1, 2])
         op1 = qml.evolve(H_i + H1)
         op2 = qml.evolve(H_i + H1)
 
@@ -360,7 +360,7 @@ class TestBraketAhsDevice:
     def test_validate_operations_wires_match_device(self):
         """Test that an error is raised if the wires on the Hamiltonian
         don't match the wires on the device."""
-        H = H_i + drive(3, 2, 2, wires=[0, 1, 2])
+        H = H_i + rydberg_drive(3, 2, 2, wires=[0, 1, 2])
 
         dev1 = BraketLocalAhsDevice(wires=len(H.wires)-1)
         dev2 = BraketLocalAhsDevice(wires=len(H.wires)+1)
@@ -377,7 +377,7 @@ class TestBraketAhsDevice:
 
         # register has wires [0, 1, 2], drive has wire [3]
         # creating a Hamiltonian like this in PL will raise a warning, but not an error
-        H = H_i + drive(3, 2, 2, wires=3)
+        H = H_i + rydberg_drive(3, 2, 2, wires=3)
 
         # device wires [0, 1, 2, 3] match overall wires, but not length of register
         dev = BraketLocalAhsDevice(wires=4)
@@ -431,7 +431,7 @@ class TestBraketAhsDevice:
         # check which of initial pulse parameters are callable
         callable_amp = callable(pulse.amplitude)
         callable_phase = callable(pulse.phase)
-        callable_detuning = callable(pulse.detuning)
+        callable_detuning = callable(pulse.frequency)
 
         # get an expected value for each pulse parameter at t=1.7
         if callable_amp:
@@ -447,10 +447,10 @@ class TestBraketAhsDevice:
             phase_sample = pulse.phase
 
         if callable_detuning:
-            detuning_sample = pulse.detuning(params[idx], 1.7)
+            detuning_sample = pulse.frequency(params[idx], 1.7)
             idx += 1
         else:
-            detuning_sample = pulse.detuning
+            detuning_sample = pulse.frequency
 
         # evaluate pulses
         dev_sim._evaluate_pulses(ev_op)
@@ -470,10 +470,10 @@ class TestBraketAhsDevice:
             assert phase_sample == dev_sim.pulses[0].phase
 
         if callable_detuning:
-            assert isinstance(dev_sim.pulses[0].detuning, partial)
-            assert detuning_sample == dev_sim.pulses[0].detuning(1.7)
+            assert isinstance(dev_sim.pulses[0].frequency, partial)
+            assert detuning_sample == dev_sim.pulses[0].frequency(1.7)
         else:
-            assert detuning_sample == dev_sim.pulses[0].detuning
+            assert detuning_sample == dev_sim.pulses[0].frequency
 
     @pytest.mark.parametrize("time_interval", [[1.5, 2.3], [0, 1.2], [0.111, 3.789]])
     def test_get_sample_times(self, time_interval):
@@ -836,8 +836,8 @@ class TestBraketAwsAhsDevice:
         assert isinstance(dev.ahs_program, AnalogHamiltonianSimulation)
 
         # all zeros because the ahs.discretize function without an actual hardware connection returns 0s
-        assert ahs_program.register.coordinate_list(0) == [0 for c in evolution.H.register]
-        assert ahs_program.register.coordinate_list(1) == [0 for c in evolution.H.register]
+        assert ahs_program.register.coordinate_list(0) == [0 for c in evolution.H.settings.register]
+        assert ahs_program.register.coordinate_list(1) == [0 for c in evolution.H.settings.register]
 
         # elements of the hamiltonian have the expected shape
         h = ahs_program.hamiltonian
