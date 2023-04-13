@@ -521,7 +521,7 @@ class BraketLocalAhsDevice(BraketAhsDevice):
 
         Returns:
             AnalogHamiltonianSimulation: a program containing the register and drive
-                information for running an AHS task on simulation.ß"""
+                information for running an AHS task on simulation."""
 
         # sets self.pulses to be the evaluated pulses (now only a function of time)
         self._evaluate_pulses(evolution)
