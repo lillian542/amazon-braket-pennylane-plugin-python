@@ -626,7 +626,7 @@ class BraketLocalAhsDevice(BraketAhsDevice):
         return max_detuning, Pattern(pattern)
 
     def _convert_pulses_to_shifting_field(self, detuning, pattern, time_interval):
-        """Uses the list of ``RydbergPulse`` objects from PennyLane to create a ``ShiftingField`` object from
+        """Uses the overall detuning and pattern to create a ``ShiftingField`` object from
         AWS Braket.
 
         Args:
