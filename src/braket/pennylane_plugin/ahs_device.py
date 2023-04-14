@@ -529,7 +529,7 @@ class BraketLocalAhsDevice(BraketAhsDevice):
 
         time_interval = evolution.t
 
-        H = self._convert_pulse_to_driving_field(self.pulses[self._global_pulse], time_interval)
+        H = self._convert_pulse_to_driving_field(self.pulses[self._global_pulse_idx], time_interval)
 
         # Create local detunings
         local_detunings = self._create_valid_local_detunings()
@@ -549,11 +549,16 @@ class BraketLocalAhsDevice(BraketAhsDevice):
     def _create_valid_local_detunings(self):
         """Return ordered list of local detunings for all wires in device.
 
+        This function uses the local detunings of the pulses of the ``ParametrizedEvolution`` being executed
+        to create a list of local detunings with the same length and order as the device wires. For wires that
+        aren't locally detuned, the list is padded with zeros if the detunings are of type ``float``, or functions
+        that return zero if the detunings are ``callable``.
+
         Returns:
             List[Union[callable, float]]: List of detunings covering all device wires.
         """
         local_pulses = self.pulses.copy()
-        local_pulses.pop(self._global_pulse)
+        local_pulses.pop(self._global_pulse_idx)
         if len(local_pulses) == 0:
             return None
 
@@ -569,48 +574,73 @@ class BraketLocalAhsDevice(BraketAhsDevice):
         return device_detunings
 
     def _extract_pattern_from_detunings(self, detunings, time_interval):
-        """Use the detunings as defined in PennyLane to find the pattern for the ``ShiftingField``
+        """Use the detunings to find the pattern for the ``ShiftingField``.
+
+        This function creates a time series for the local detunings and uses the values
+        of the detunings at each time step to calculate and validate the pattern for the
+        ``ShiftingField`` term of the driving Hamiltonian.
 
         Args:
             detunings (List[Union[float, callable]]): detunings to extract pattern from
             time_interval(array[Number, Number]]): The start and end time for the applied pulses
 
         Returns:
-            Union[float, callable]: Updated detuning for ``ShiftingField``
-            Pattern: Pattern object containing magnitude of detunings for individual atoms in the device
+            Union[float, callable]: Maximum detuning to be used as the magnitude for ``ShiftingField``
+            Pattern: object containing magnitude of detunings for individual atoms in the device
+
+        Raises:
+            ValueError: if the shape of all local detunings don't match or the detunings have negative values
         """
         # If a single item is not callable, no others should be callable. This validation happens in
         # ``_validate_pulses``.
+        callable_detunings = callable(detunings[0])
         time_points = self._get_sample_times(time_interval)
+        negative_detunings_error = (
+            "Found negative value in local detunings. Make sure that all local detunings "
+            + "take only positive values within the specified time interval."
+        )
 
-        if not callable(detunings[0]):
-            max_detuning = np.amax(detunings)
+        if not callable_detunings:
+            max_index = np.argmax(np.abs(detunings))
+            max_detuning = np.abs(detunings[max_index])
+            # Using the absolute value ensures that if there are any negative values,
+            # the get captured in the pattern
+
             pattern = [det / max_detuning for det in detunings]
-            return max_detuning, Pattern(pattern)
 
-        evaluated_detunings = np.array([
-            [float(detuning(t * 1e6)) for t in time_points] for detuning in detunings
-        ])
-        pattern = []
+        else:
+            evaluated_detunings = np.array([
+                [float(detuning(t * 1e6)) for t in time_points] for detuning in detunings
+            ])
+            if not np.allclose(evaluated_detunings, np.abs(evaluated_detunings)):
+                raise ValueError(negative_detunings_error)
 
-        # Find pattern if callable detuning
-        for i in range(len(time_points)):
-            time_slice = evaluated_detunings[:, i]
+            pattern = []
 
-            if not np.allclose(time_slice, 0.0):
-                time_slice = np.abs(time_slice)
+            # Find pattern if callable detuning
+            for i in range(len(time_points)):
+                time_slice = evaluated_detunings[:, i]
 
-                _max = np.amax(time_slice)
-                max_index = int(np.argmax(time_slice))
-                max_detuning = detunings[max_index]
-
-                pattern = [det / _max for det in time_slice]
-                break
+                if not np.allclose(time_slice, 0.0):
+                    max_index = np.argmax(np.abs(time_slice))
+                    _max = np.abs(time_slice[max_index])
+                    max_detuning = detunings[max_index]
+                    pattern = [det / _max for det in time_slice]
+                    break
 
         # If all time steps are zero, local detuning is assumed to be zero
         if pattern == []:
             max_detuning = 0
             pattern = [1.0] * len(detunings)
+            return max_detuning, Pattern(pattern)
+
+        # Validate that all detunings are positive
+        if not np.allclose(pattern, np.abs(pattern)):
+            raise ValueError(negative_detunings_error)
+
+        # Skip validation if detunings are not callable
+        if not callable_detunings:
+            return max_detuning, Pattern(pattern)
 
         # Validate that detunings follow pattern along all time steps
         for i, t in enumerate(time_points):
@@ -661,10 +691,10 @@ class BraketLocalAhsDevice(BraketAhsDevice):
         """
 
         # Iterate through pulses to find global drive
-        global_index = -1
+        global_index = None
         for i, pulse in enumerate(pulses):
             if set(pulse.wires) == set(self.wires):
-                if global_index != -1:
+                if global_index is not None:
                     raise ValueError(
                         "Cannot execute a ParametrizedEvolution with multiple global drives."
                     )
@@ -676,12 +706,12 @@ class BraketLocalAhsDevice(BraketAhsDevice):
                 )
 
         # Validate that global drive covers all wires
-        if global_index == -1:
+        if global_index is None:
             raise ValueError(
                 "ParametrizedEvolution doesn't apply a global driving field to all wires."
             )
 
-        self._global_pulse = global_index
+        self._global_pulse_idx = global_index
 
         local_pulses = pulses.copy()
         local_pulses.pop(global_index)
@@ -690,6 +720,7 @@ class BraketLocalAhsDevice(BraketAhsDevice):
             return
 
         # Validate that local drives don't have amplitude or phase, and that various detunings aren't inconsistent
+        # The detunings are stored in the `frequency` attribute of `HardwarePulse`
         callable_detunings = callable(local_pulses[0].frequency)
         local_wires = set()
 
@@ -701,7 +732,10 @@ class BraketLocalAhsDevice(BraketAhsDevice):
                     "Shifting field only allows specification of detuning. Amplitude must be zero."
                 )
             if callable(pulse.frequency) ^ callable_detunings:
-                raise ValueError("All local drives must have the same shape.")
+                raise ValueError(
+                    "Found local pulses with both `float` and `callable` detunings. Pulses for local detunings "
+                    "must all have only `float` or `callable` detuning (frequency)."
+                )
             if set(pulse.wires).intersection(local_wires):
                 raise ValueError("Local drives must not have overlapping wires.")
 
