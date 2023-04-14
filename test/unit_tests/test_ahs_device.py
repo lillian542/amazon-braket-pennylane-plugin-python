@@ -13,10 +13,9 @@
 
 
 import pytest
-import warnings
 import json
 from unittest import mock
-from unittest.mock import Mock, PropertyMock, patch
+from unittest.mock import Mock
 
 import pennylane as qml
 import numpy as np

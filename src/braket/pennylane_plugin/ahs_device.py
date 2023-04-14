@@ -601,15 +601,7 @@ class BraketLocalAhsDevice(BraketAhsDevice):
             + "take only positive values within the specified time interval."
         )
 
-        if not callable_detunings:
-            max_index = np.argmax(np.abs(detunings))
-            max_detuning = np.abs(detunings[max_index])
-            # Using the absolute value ensures that if there are any negative values,
-            # the get captured in the pattern
-
-            pattern = [det / max_detuning for det in detunings]
-
-        else:
+        if callable_detunings:
             evaluated_detunings = np.array([
                 [float(detuning(t * 1e6)) for t in time_points] for detuning in detunings
             ])
@@ -623,27 +615,33 @@ class BraketLocalAhsDevice(BraketAhsDevice):
                 time_slice = evaluated_detunings[:, i]
 
                 if not np.allclose(time_slice, 0.0):
-                    max_index = np.argmax(np.abs(time_slice))
-                    _max = np.abs(time_slice[max_index])
+                    max_index = np.argmax(time_slice)
+                    _max = time_slice[max_index]
                     max_detuning = detunings[max_index]
                     pattern = [det / _max for det in time_slice]
                     break
 
-        # If all time steps are zero, local detuning is assumed to be zero
-        if pattern == []:
-            max_detuning = 0
-            pattern = [1.0] * len(detunings)
+            # If all time steps are zero, local detuning is assumed to be zero
+            if pattern == []:
+                max_detuning = 0
+                pattern = [1.0] * len(detunings)
+                return max_detuning, Pattern(pattern)
+
+        else:
+            max_index = np.argmax(np.abs(detunings))
+            max_detuning = np.abs(detunings[max_index])
+            # Using the absolute value ensures that if there are any negative values,
+            # the get captured in the pattern
+
+            pattern = [det / max_detuning for det in detunings]
+
+            # Validate that all detunings are positive
+            if not np.allclose(pattern, np.abs(pattern)):
+                raise ValueError(negative_detunings_error)
+
             return max_detuning, Pattern(pattern)
 
-        # Validate that all detunings are positive
-        if not np.allclose(pattern, np.abs(pattern)):
-            raise ValueError(negative_detunings_error)
-
-        # Skip validation if detunings are not callable
-        if not callable_detunings:
-            return max_detuning, Pattern(pattern)
-
-        # Validate that detunings follow pattern along all time steps
+        # Validate that detunings follow pattern along all time steps for callable detunings
         for i, t in enumerate(time_points):
             time_slice = evaluated_detunings[:, i]
             
@@ -670,7 +668,7 @@ class BraketLocalAhsDevice(BraketAhsDevice):
         """
         time_points = self._get_sample_times(time_interval)
         ts_detuning = self._convert_to_time_series(
-            detuning, time_points, scaling_factor=2 * np.pi * 1e6
+            detuning, time_points, scaling_factor=1e6
         )
         shift = ShiftingField(magnitude=Field(time_series=ts_detuning, pattern=pattern))
 
