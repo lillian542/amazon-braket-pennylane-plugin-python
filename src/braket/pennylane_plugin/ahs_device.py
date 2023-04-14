@@ -322,12 +322,12 @@ class BraketAhsDevice(QubitDevice):
 
         time_points = self._get_sample_times(time_interval)
 
-        # scaling factor for amp and frequency detuning converts MHz (PL input) to rad/s (upload units)
+        # scaling factor for amp and frequency detuning converts Mrad/s (PL input) to rad/s (upload units)
         amplitude = self._convert_to_time_series(
-            pulse.amplitude, time_points, scaling_factor=2 * np.pi * 1e6
+            pulse.amplitude, time_points, scaling_factor=1e6
         )
         detuning = self._convert_to_time_series(
-            pulse.frequency, time_points, scaling_factor=2 * np.pi * 1e6
+            pulse.frequency, time_points, scaling_factor=1e6
         )
         phase = self._convert_to_time_series(pulse.phase, time_points)
 
@@ -437,9 +437,9 @@ class BraketAwsAhsDevice(BraketAhsDevice):
         return {"interaction_coeff": self._get_rydberg_c6()}
 
     def _get_rydberg_c6(self):
-        """Get rydberg C6 and convert from rad/s m^6 (AWS units) to MHz um^6 (PL simulation units)"""
+        """Get rydberg C6 and convert from rad/s m^6 (AWS units) to Mrad/s um^6 (PL simulation units)"""
         c6 = float(self._device.properties.paradigm.rydberg.c6Coefficient)  # rad/s x m^6
-        c6 = 1e-6 * c6/(2*np.pi)  # rad/s --> MHz
+        c6 = 1e-6 * c6  # rad/s --> M rad/s
         c6 = c6 * 1e36  # m^6 --> um^6
         return c6
 
@@ -510,7 +510,8 @@ class BraketLocalAhsDevice(BraketAhsDevice):
         term is created using the constants specific to the hardware. This is relevant for simulating the remote
         device in PennyLane on the ``default.qubit`` device.
         """
-        return {"interaction_coeff": 862690}  # C6 for the Rubidium transition used by the simulator, MHz x um^6
+        # C6 for the Rubidium transition used by the simulator, converted to units expected in PL (Mrad/s x um^6)
+        return {"interaction_coeff": 5420000}
 
     def _ahs_program_from_evolution(self, evolution):
         """Create AHS program for simulation from a ParametrizedEvolution
