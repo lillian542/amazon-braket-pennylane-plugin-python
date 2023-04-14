@@ -669,7 +669,7 @@ class BraketLocalAhsDevice(BraketAhsDevice):
                         "Cannot execute a ParametrizedEvolution with multiple global drives."
                     )
                 global_index = i
-            elif not set(pulse.wires).issubset(set(self.wires)):
+            elif not self.wires.contains_wires(pulse.wires):
                 raise ValueError(
                     f"ParametrizedEvolution contains wires {pulse.wires} which are not a subset "
                     f"of device wires {self.wires}."
