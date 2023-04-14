@@ -630,7 +630,7 @@ class BraketLocalAhsDevice(BraketAhsDevice):
         AWS Braket.
 
         Args:
-            detuning (callable): detuning for the local drives
+            detuning (float, callable): detuning for the local drives
             pattern (Pattern): list containing magnitude of detuning for all atoms in the device
             time_interval(array[Number, Number]]): The start and end time for the applied pulses
 
