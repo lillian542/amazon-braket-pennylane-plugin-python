@@ -82,8 +82,6 @@ class CPhaseShift00(Operation):
     Args:
         phi (float): the controlled phase angle
         wires (int): the subsystem the gate acts on
-        do_queue (bool, optional): Indicates whether the operator should be
-            immediately pushed into the Operator queue. Default: None
         id (str, optional): String representing the operation. Default: None
 
     """
@@ -95,8 +93,8 @@ class CPhaseShift00(Operation):
     def generator(self):
         return qml.Projector(np.array([0, 0]), wires=self.wires)
 
-    def __init__(self, phi, wires, do_queue=None, id=None):
-        super().__init__(phi, wires=wires, do_queue=do_queue, id=id)
+    def __init__(self, phi, wires, id=None):
+        super().__init__(phi, wires=wires, id=id)
 
     @staticmethod
     def compute_decomposition(phi, wires):
@@ -114,9 +112,7 @@ class CPhaseShift00(Operation):
 
     @staticmethod
     def compute_matrix(phi):
-        if qml.math.get_interface(phi) == "tensorflow":
-            phi = qml.math.cast_like(phi, 1j)
-
+        phi = _cast_to_tf(phi)
         return qml.math.diag([qml.math.exp(1j * phi), 1, 1, 1])
 
     def adjoint(self):
@@ -150,8 +146,6 @@ class CPhaseShift01(Operation):
     Args:
         phi (float): the controlled phase angle
         wires (int): the subsystem the gate acts on
-        do_queue (bool): Indicates whether the operator should be
-            immediately pushed into the Operator queue (optional)
         id (str or None): String representing the operation (optional)
     """
     num_params = 1
@@ -162,8 +156,8 @@ class CPhaseShift01(Operation):
     def generator(self):
         return qml.Projector(np.array([0, 1]), wires=self.wires)
 
-    def __init__(self, phi, wires, do_queue=None, id=None):
-        super().__init__(phi, wires=wires, do_queue=do_queue, id=id)
+    def __init__(self, phi, wires, id=None):
+        super().__init__(phi, wires=wires, id=id)
 
     @staticmethod
     def compute_decomposition(phi, wires):
@@ -179,9 +173,7 @@ class CPhaseShift01(Operation):
 
     @staticmethod
     def compute_matrix(phi):
-        if qml.math.get_interface(phi) == "tensorflow":
-            phi = qml.math.cast_like(phi, 1j)
-
+        phi = _cast_to_tf(phi)
         return qml.math.diag([1, qml.math.exp(1j * phi), 1, 1])
 
     def adjoint(self):
@@ -215,8 +207,6 @@ class CPhaseShift10(Operation):
     Args:
         phi (float): the controlled phase angle
         wires (int): the subsystem the gate acts on
-        do_queue (bool): Indicates whether the operator should be
-            immediately pushed into the Operator queue (optional)
         id (str or None): String representing the operation (optional)
     """
     num_params = 1
@@ -227,8 +217,8 @@ class CPhaseShift10(Operation):
     def generator(self):
         return qml.Projector(np.array([1, 0]), wires=self.wires)
 
-    def __init__(self, phi, wires, do_queue=None, id=None):
-        super().__init__(phi, wires=wires, do_queue=do_queue, id=id)
+    def __init__(self, phi, wires, id=None):
+        super().__init__(phi, wires=wires, id=id)
 
     @staticmethod
     def compute_decomposition(phi, wires):
@@ -244,9 +234,7 @@ class CPhaseShift10(Operation):
 
     @staticmethod
     def compute_matrix(phi):
-        if qml.math.get_interface(phi) == "tensorflow":
-            phi = qml.math.cast_like(phi, 1j)
-
+        phi = _cast_to_tf(phi)
         return qml.math.diag([1, 1, qml.math.exp(1j * phi), 1])
 
     def adjoint(self):
@@ -279,8 +267,6 @@ class PSWAP(Operation):
     Args:
         phi (float): the phase angle
         wires (int): the subsystem the gate acts on
-        do_queue (bool): Indicates whether the operator should be
-            immediately pushed into the Operator queue (optional)
         id (str or None): String representing the operation (optional)
     """
     num_params = 1
@@ -288,8 +274,8 @@ class PSWAP(Operation):
     grad_method = "A"
     grad_recipe = ([[0.5, 1, np.pi / 2], [-0.5, 1, -np.pi / 2]],)
 
-    def __init__(self, phi, wires, do_queue=None, id=None):
-        super().__init__(phi, wires=wires, do_queue=do_queue, id=id)
+    def __init__(self, phi, wires, id=None):
+        super().__init__(phi, wires=wires, id=id)
 
     @staticmethod
     def compute_decomposition(phi, wires):
@@ -302,9 +288,7 @@ class PSWAP(Operation):
 
     @staticmethod
     def compute_matrix(phi):
-        if qml.math.get_interface(phi) == "tensorflow":
-            phi = qml.math.cast_like(phi, 1j)
-
+        phi = _cast_to_tf(phi)
         return qml.math.diag([1, np.exp(1j * phi), np.exp(1j * phi), 1])[[0, 2, 1, 3]]
 
     def adjoint(self):
@@ -330,22 +314,18 @@ class GPi(Operation):
     Args:
         phi (float): the phase angle
         wires (int): the subsystem the gate acts on
-        do_queue (bool): Indicates whether the operator should be
-            immediately pushed into the Operator queue (optional)
         id (str or None): String representing the operation (optional)
     """
     num_params = 1
     num_wires = 1
     grad_method = "F"
 
-    def __init__(self, phi, wires, do_queue=None, id=None):
-        super().__init__(phi, wires=wires, do_queue=do_queue, id=id)
+    def __init__(self, phi, wires, id=None):
+        super().__init__(phi, wires=wires, id=id)
 
     @staticmethod
     def compute_matrix(phi):
-        if qml.math.get_interface(phi) == "tensorflow":
-            phi = qml.math.cast_like(phi, 1j)
-
+        phi = _cast_to_tf(phi)
         return np.array(
             [
                 [0, np.exp(-1j * phi)],
@@ -376,22 +356,18 @@ class GPi2(Operation):
     Args:
         phi (float): the phase angle
         wires (int): the subsystem the gate acts on
-        do_queue (bool): Indicates whether the operator should be
-            immediately pushed into the Operator queue (optional)
         id (str or None): String representing the operation (optional)
     """
     num_params = 1
     num_wires = 1
     grad_method = "F"
 
-    def __init__(self, phi, wires, do_queue=None, id=None):
-        super().__init__(phi, wires=wires, do_queue=do_queue, id=id)
+    def __init__(self, phi, wires, id=None):
+        super().__init__(phi, wires=wires, id=id)
 
     @staticmethod
     def compute_matrix(phi):
-        if qml.math.get_interface(phi) == "tensorflow":
-            phi = qml.math.cast_like(phi, 1j)
-
+        phi = _cast_to_tf(phi)
         return np.array(
             [
                 [1, -1j * np.exp(-1j * phi)],
@@ -426,23 +402,19 @@ class MS(Operation):
         phi_0 (float): the first phase angle
         phi_1 (float): the second phase angle
         wires (int): the subsystem the gate acts on
-        do_queue (bool): Indicates whether the operator should be
-            immediately pushed into the Operator queue (optional)
         id (str or None): String representing the operation (optional)
     """
     num_params = 2
     num_wires = 2
     grad_method = "F"
 
-    def __init__(self, phi_0, phi_1, wires, do_queue=None, id=None):
-        super().__init__(phi_0, phi_1, wires=wires, do_queue=do_queue, id=id)
+    def __init__(self, phi_0, phi_1, wires, id=None):
+        super().__init__(phi_0, phi_1, wires=wires, id=id)
 
     @staticmethod
     def compute_matrix(phi_0, phi_1):
-        if qml.math.get_interface(phi_0) == "tensorflow":
-            phi_0 = qml.math.cast_like(phi_0, 1j)
-        if qml.math.get_interface(phi_1) == "tensorflow":
-            phi_1 = qml.math.cast_like(phi_1, 1j)
+        phi_0 = _cast_to_tf(phi_0)
+        phi_1 = _cast_to_tf(phi_1)
 
         return np.array(
             [
@@ -481,25 +453,20 @@ class AAMS(Operation):
         phi_1 (float): the second phase angle
         theta (float): the entangling angle
         wires (int): the subsystem the gate acts on
-        do_queue (bool): Indicates whether the operator should be
-            immediately pushed into the Operator queue (optional)
         id (str or None): String representing the operation (optional)
     """
     num_params = 3
     num_wires = 2
     grad_method = "F"
 
-    def __init__(self, phi_0, phi_1, theta, wires, do_queue=True, id=None):
-        super().__init__(phi_0, phi_1, theta, wires=wires, do_queue=do_queue, id=id)
+    def __init__(self, phi_0, phi_1, theta, wires, id=None):
+        super().__init__(phi_0, phi_1, theta, wires=wires, id=id)
 
     @staticmethod
     def compute_matrix(phi_0, phi_1, theta):
-        if qml.math.get_interface(phi_0) == "tensorflow":
-            phi_0 = qml.math.cast_like(phi_0, 1j)
-        if qml.math.get_interface(phi_1) == "tensorflow":
-            phi_1 = qml.math.cast_like(phi_1, 1j)
-        if qml.math.get_interface(theta) == "tensorflow":
-            theta = qml.math.cast_like(theta, 1j)
+        phi_0 = _cast_to_tf(phi_0)
+        phi_1 = _cast_to_tf(phi_1)
+        theta = _cast_to_tf(theta)
 
         return np.array(
             [
@@ -513,3 +480,7 @@ class AAMS(Operation):
     def adjoint(self):
         (phi_0, phi_1, theta) = self.parameters
         return AAMS(phi_0 + np.pi, phi_1, theta, wires=self.wires)
+
+
+def _cast_to_tf(val):
+    return qml.math.cast_like(val, 1j) if qml.math.get_interface(val) == "tensorflow" else val

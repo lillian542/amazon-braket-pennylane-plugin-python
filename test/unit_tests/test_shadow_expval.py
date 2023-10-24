@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 from unittest import mock
 from unittest.mock import Mock, PropertyMock, patch
 
@@ -308,11 +308,11 @@ def test_shadow_expval_local(
     )
 
 
-def _noop(*args, **kwargs):
-    return None
+def _aws_device_mock_init(self, arn, aws_session):
+    self._arn = arn
 
 
-@patch.object(AwsDevice, "__init__", _noop)
+@patch.object(AwsDevice, "__init__", _aws_device_mock_init)
 @patch.object(AwsDevice, "aws_session", new_callable=mock.PropertyMock)
 @patch.object(AwsDevice, "type", new_callable=mock.PropertyMock)
 @patch.object(AwsDevice, "properties")
@@ -352,7 +352,7 @@ class DummyLocalQubitDevice(BraketQubitDevice):
 class DummyCircuitSimulator(BraketSimulator):
     def run(
         self, program: ir.openqasm.Program, qubits: int, shots: Optional[int], *args, **kwargs
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         self._shots = shots
         self._qubits = qubits
         return GATE_MODEL_RESULT

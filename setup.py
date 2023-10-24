@@ -73,7 +73,7 @@ setup(
             TF_VERSION,
         ]
     },
-    url="https://github.com/aws/amazon-braket-pennylane-plugin-python",
+    url="https://github.com/amazon-braket/amazon-braket-pennylane-plugin-python",
     author="Amazon Web Services",
     description=(
         "An open source framework for using Amazon Braket devices with the PennyLane"
@@ -88,7 +88,6 @@ setup(
         "Natural Language :: English",
         "License :: OSI Approved :: Apache Software License",
         "Programming Language :: Python",
-        "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",

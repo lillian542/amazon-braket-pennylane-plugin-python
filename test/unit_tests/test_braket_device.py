@@ -12,7 +12,7 @@
 # language governing permissions and limitations under the License.
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 from unittest import mock
 from unittest.mock import Mock, PropertyMock, patch
 
@@ -24,14 +24,27 @@ from braket.aws import AwsDevice, AwsDeviceType, AwsQuantumTask, AwsQuantumTaskB
 from braket.circuits import Circuit, FreeParameter, Gate, Noise, Observable, result_types
 from braket.circuits.noise_model import GateCriteria, NoiseModel, NoiseModelInstruction
 from braket.device_schema import DeviceActionType
-from braket.device_schema.openqasm_device_action_properties import OpenQASMDeviceActionProperties
+from braket.device_schema.gate_model_qpu_paradigm_properties_v1 import (
+    GateModelQpuParadigmProperties,
+)
+from braket.device_schema.pulse.pulse_device_action_properties_v1 import PulseDeviceActionProperties
 from braket.device_schema.simulators import GateModelSimulatorDeviceCapabilities
 from braket.devices import LocalSimulator
 from braket.simulator import BraketSimulator
-from braket.task_result import GateModelTaskResult
 from braket.tasks import GateModelQuantumTaskResult
+from device_property_jsons import (
+    ACTION_PROPERTIES,
+    ACTION_PROPERTIES_DM_DEVICE,
+    ACTION_PROPERTIES_NATIVE,
+    ACTION_PROPERTIES_NO_ADJOINT,
+    GATE_MODEL_RESULT,
+    OQC_PARADIGM_PROPERTIES,
+    OQC_PULSE_PROPERTIES_ALL_FRAMES,
+    RESULT,
+)
 from pennylane import QuantumFunctionError, QubitDevice
 from pennylane import numpy as np
+from pennylane.pulse import ParametrizedEvolution
 from pennylane.tape import QuantumScript, QuantumTape
 
 import braket.pennylane_plugin.braket_device
@@ -48,131 +61,6 @@ from braket.pennylane_plugin.braket_device import BraketQubitDevice, Shots
 
 SHOTS = 10000
 
-ACTION_PROPERTIES = OpenQASMDeviceActionProperties.parse_raw(
-    json.dumps(
-        {
-            "actionType": "braket.ir.openqasm.program",
-            "version": ["1"],
-            "supportedOperations": ["rx", "ry", "h", "cy", "cnot", "unitary"],
-            "supportedResultTypes": [
-                {"name": "StateVector", "observables": None, "minShots": 0, "maxShots": 0},
-                {
-                    "name": "AdjointGradient",
-                    "observables": ["x", "y", "z", "h", "i"],
-                    "minShots": 0,
-                    "maxShots": 0,
-                },
-            ],
-        }
-    )
-)
-
-ACTION_PROPERTIES_DM_DEVICE = OpenQASMDeviceActionProperties.parse_raw(
-    json.dumps(
-        {
-            "actionType": "braket.ir.openqasm.program",
-            "version": ["1"],
-            "supportedOperations": ["rx", "ry", "h", "cy", "cnot", "unitary"],
-            "supportedResultTypes": [
-                {"name": "StateVector", "observables": None, "minShots": 0, "maxShots": 0},
-            ],
-            "supportedPragmas": [
-                "braket_noise_bit_flip",
-                "braket_noise_depolarizing",
-                "braket_noise_kraus",
-                "braket_noise_pauli_channel",
-                "braket_noise_generalized_amplitude_damping",
-                "braket_noise_amplitude_damping",
-                "braket_noise_phase_flip",
-                "braket_noise_phase_damping",
-                "braket_noise_two_qubit_dephasing",
-                "braket_noise_two_qubit_depolarizing",
-                "braket_unitary_matrix",
-                "braket_result_type_sample",
-                "braket_result_type_expectation",
-                "braket_result_type_variance",
-                "braket_result_type_probability",
-                "braket_result_type_density_matrix",
-            ],
-        }
-    )
-)
-
-ACTION_PROPERTIES_NATIVE = OpenQASMDeviceActionProperties.parse_raw(
-    json.dumps(
-        {
-            "actionType": "braket.ir.openqasm.program",
-            "version": ["1"],
-            "supportedOperations": ["rx", "ry", "h", "cy", "cnot", "unitary"],
-            "supportedResultTypes": [
-                {"name": "StateVector", "observables": None, "minShots": 0, "maxShots": 0},
-                {
-                    "name": "AdjointGradient",
-                    "observables": ["x", "y", "z", "h", "i"],
-                    "minShots": 0,
-                    "maxShots": 0,
-                },
-            ],
-            "supportedPragmas": ["verbatim"],
-        }
-    )
-)
-
-GATE_MODEL_RESULT = GateModelTaskResult(
-    **{
-        "measurements": [[0, 0], [0, 0], [0, 0], [1, 1]],
-        "measuredQubits": [0, 1],
-        "taskMetadata": {
-            "braketSchemaHeader": {"name": "braket.task_result.task_metadata", "version": "1"},
-            "id": "task_arn",
-            "shots": 100,
-            "deviceId": "default",
-        },
-        "additionalMetadata": {
-            "action": {
-                "braketSchemaHeader": {"name": "braket.ir.openqasm.program", "version": "1"},
-                "source": "qubit[2] q; cnot q[0], q[1]; measure q;",
-            },
-        },
-    }
-)
-
-RESULT = GateModelQuantumTaskResult.from_string(
-    json.dumps(
-        {
-            "braketSchemaHeader": {
-                "name": "braket.task_result.gate_model_task_result",
-                "version": "1",
-            },
-            "measurements": [[0, 0, 0, 0], [1, 1, 1, 1], [1, 1, 0, 0], [0, 0, 1, 1]],
-            "resultTypes": [
-                {"type": {"targets": [0], "type": "probability"}, "value": [0.5, 0.5]},
-                {
-                    "type": {"observable": ["x"], "targets": [1], "type": "expectation"},
-                    "value": 0.0,
-                },
-                {"type": {"observable": ["y"], "targets": [2], "type": "variance"}, "value": 0.1},
-                {
-                    "type": {"observable": ["z"], "targets": [3], "type": "sample"},
-                    "value": [1, -1, 1, 1],
-                },
-            ],
-            "measuredQubits": [0, 1, 2, 3],
-            "taskMetadata": {
-                "braketSchemaHeader": {"name": "braket.task_result.task_metadata", "version": "1"},
-                "id": "task_arn",
-                "shots": 0,
-                "deviceId": "default",
-            },
-            "additionalMetadata": {
-                "action": {
-                    "braketSchemaHeader": {"name": "braket.ir.openqasm.program", "version": "1"},
-                    "source": "qubit[2] q; cnot q[0], q[1]; measure q;",
-                },
-            },
-        }
-    )
-)
 TASK = Mock()
 TASK.result.return_value = RESULT
 type(TASK).id = PropertyMock(return_value="task_arn")
@@ -235,16 +123,10 @@ def test_apply_unique_parameters():
     )
     expected = Circuit().h(0).cnot(0, 1).rx(0, FreeParameter("p_0"))
     expected = expected.ry(0, FreeParameter("p_1"))
-    expected = expected.generalized_amplitude_damping(
-        0,
-        gamma=FreeParameter("p_2"),
-        probability=FreeParameter("p_3"),
-    )
-    expected = expected.generalized_amplitude_damping(
-        0,
-        gamma=FreeParameter("p_4"),
-        probability=FreeParameter("p_5"),
-    )
+
+    # Right now, the Braket SDK doesn't keep track of noise parameters
+    expected = expected.generalized_amplitude_damping(0, gamma=0.1, probability=0.9)
+    expected = expected.generalized_amplitude_damping(0, gamma=0.1, probability=0.9)
     assert circuit == expected
 
 
@@ -350,9 +232,9 @@ def test_execute(mock_run):
 
 
 @patch.object(AwsDevice, "run")
-def test_execute_legacy(mock_run):
+def test_execute_parametrize_differentiable(mock_run):
     mock_run.return_value = TASK
-    dev = _aws_device(wires=4, foo="bar")
+    dev = _aws_device(wires=4, parametrize_differentiable=True, foo="bar")
 
     with QuantumTape() as circuit:
         qml.Hadamard(wires=0)
@@ -363,10 +245,6 @@ def test_execute_legacy(mock_run):
         qml.expval(qml.PauliX(1))
         qml.var(qml.PauliY(2))
         qml.sample(qml.PauliZ(3))
-
-    # If the tape is constructed with a QNode, only the parameters marked requires_grad=True
-    # will appear
-    circuit._trainable_params = [0]
 
     results = dev._execute_legacy(circuit)
 
@@ -392,7 +270,9 @@ def test_execute_legacy(mock_run):
         Circuit()
         .h(0)
         .unitary([0], 1 / np.sqrt(2) * np.array([[1, 1], [1, -1]]))
-        .rx(0, 0.432)
+        # When using QuantumTape directly (as opposed to a QNode),
+        # all parameters are automatically considered differentiable
+        .rx(0, FreeParameter("p_1"))
         .cnot(0, 1)
         .i(2)
         .i(3)
@@ -408,7 +288,7 @@ def test_execute_legacy(mock_run):
         poll_timeout_seconds=AwsQuantumTask.DEFAULT_RESULTS_POLL_TIMEOUT,
         poll_interval_seconds=AwsQuantumTask.DEFAULT_RESULTS_POLL_INTERVAL,
         foo="bar",
-        inputs={},
+        inputs={"p_1": 0.432},
     )
 
 
@@ -458,17 +338,17 @@ CIRCUIT_4 = QuantumScript(
 )
 CIRCUIT_4.trainable_params = []
 
-PARAMS_5 = np.array([0.432, 0.543], requires_grad=True)
+PARAM_5 = np.tensor(0.543, requires_grad=True)
 CIRCUIT_5 = QuantumScript(
     ops=[
         qml.Hadamard(wires=0),
         qml.CNOT(wires=[0, 1]),
-        qml.RX(PARAMS_5[0], wires=0),
-        qml.RY(PARAMS_5[1], wires=0),
+        qml.RX(0.432, wires=0),
+        qml.RY(PARAM_5, wires=0),
     ],
     measurements=[qml.var(qml.PauliX(0) @ qml.PauliY(1))],
 )
-CIRCUIT_5.trainable_params = [0, 1]
+CIRCUIT_5.trainable_params = [1]
 
 PARAM_6 = np.tensor(0.432, requires_grad=True)
 CIRCUIT_6 = QuantumScript(
@@ -671,94 +551,25 @@ def test_execute_tracker(mock_run):
     callback.assert_called_with(latest=latest, history=history, totals=totals)
 
 
-def _set_name(self, *args, **kwargs):
+def _aws_device_mock_init(self, *args, **kwargs):
+    self._arn = args[0]
+    self._properties = None
+    self._ports = None
     self._name = "name"
     return None
 
 
-@patch.object(AwsDevice, "__init__", _set_name)
+@patch.object(AwsDevice, "__init__", _aws_device_mock_init)
 @patch.object(AwsDevice, "aws_session", new_callable=mock.PropertyMock)
 @patch.object(AwsDevice, "type", new_callable=mock.PropertyMock)
 @patch.object(AwsDevice, "properties")
 @pytest.mark.parametrize(
     "action_props, shots, expected_use_grouping",
     [
-        (
-            OpenQASMDeviceActionProperties.parse_raw(
-                json.dumps(
-                    {
-                        "actionType": "braket.ir.openqasm.program",
-                        "version": ["1"],
-                        "supportedOperations": ["rx", "ry", "h", "cy", "cnot", "unitary"],
-                        "supportedResultTypes": [
-                            {
-                                "name": "StateVector",
-                                "observables": None,
-                                "minShots": 0,
-                                "maxShots": 0,
-                            },
-                        ],
-                    }
-                )
-            ),
-            0,
-            True,
-        ),
-        (
-            OpenQASMDeviceActionProperties.parse_raw(
-                json.dumps(
-                    {
-                        "actionType": "braket.ir.openqasm.program",
-                        "version": ["1"],
-                        "supportedOperations": ["rx", "ry", "h", "cy", "cnot", "unitary"],
-                        "supportedResultTypes": [
-                            {
-                                "name": "StateVector",
-                                "observables": None,
-                                "minShots": 0,
-                                "maxShots": 0,
-                            },
-                            {
-                                "name": "AdjointGradient",
-                                "observables": ["x", "y", "z", "h", "i"],
-                                "minShots": 0,
-                                "maxShots": 0,
-                            },
-                        ],
-                    }
-                )
-            ),
-            10,
-            True,
-        ),
-        (
-            OpenQASMDeviceActionProperties.parse_raw(
-                json.dumps(
-                    {
-                        "actionType": "braket.ir.openqasm.program",
-                        "version": ["1"],
-                        "supportedOperations": ["rx", "ry", "h", "cy", "cnot", "unitary"],
-                        "supportedResultTypes": [
-                            {
-                                "name": "StateVector",
-                                "observables": None,
-                                "minShots": 0,
-                                "maxShots": 0,
-                            },
-                            {
-                                "name": "AdjointGradient",
-                                "observables": ["x", "y", "z", "h", "i"],
-                                "minShots": 0,
-                                "maxShots": 0,
-                            },
-                        ],
-                    }
-                )
-            ),
-            0,
-            # Should be disabled only when AdjGrad is present and shots = 0
-            False,
-        ),
+        (ACTION_PROPERTIES_NO_ADJOINT, 0, True),
+        (ACTION_PROPERTIES, 10, True),
+        # Should be disabled only when AdjGrad is present and shots = 0
+        (ACTION_PROPERTIES, 0, False),
     ],
 )
 def test_use_grouping(
@@ -967,10 +778,15 @@ def test_pl_to_braket_circuit_hamiltonian_tensor_product_terms():
     assert braket_circuit_true == braket_circuit
 
 
+def test_parametrized_evolution_in_oqc_lucy_supported_ops():
+    dev = _aws_device(wires=2, device_arn="arn:aws:braket:eu-west-2::device/qpu/oqc/Lucy")
+    assert "ParametrizedEvolution" in dev.operations
+
+
 def test_bad_statistics():
     """Test if a QuantumFunctionError is raised for an invalid return type"""
     dev = _aws_device(wires=1, foo="bar")
-    observable = qml.Identity(wires=0, do_queue=False)
+    observable = qml.Identity(wires=0)
     observable.return_type = None
 
     with pytest.raises(QuantumFunctionError, match="Unsupported return type specified"):
@@ -1067,6 +883,7 @@ def test_batch_execute_parallel(mock_run_batch):
         max_connections=AwsQuantumTaskBatch.MAX_CONNECTIONS_DEFAULT,
         poll_timeout_seconds=AwsQuantumTask.DEFAULT_RESULTS_POLL_TIMEOUT,
         poll_interval_seconds=AwsQuantumTask.DEFAULT_RESULTS_POLL_INTERVAL,
+        inputs=[],
         foo="bar",
     )
 
@@ -1159,9 +976,63 @@ def test_batch_execute_partial_fail_parallel_tracker(mock_run_batch):
     callback.assert_called_with(latest=latest, history=history, totals=totals)
 
 
-@pytest.mark.parametrize("old_return_type", [True, False])
+@patch.object(AwsDevice, "run_batch")
+def test_batch_execute_parametrize_differentiable(mock_run_batch):
+    """Test batch_execute(parallel=True) correctly calls batch execution methods in Braket SDK"""
+    mock_run_batch.return_value = TASK_BATCH
+    dev = _aws_device(wires=4, foo="bar", parametrize_differentiable=True, parallel=True)
+
+    with QuantumTape() as circuit1:
+        qml.Hadamard(wires=0)
+        qml.QubitUnitary(1 / np.sqrt(2) * np.tensor([[1, 1], [1, -1]], requires_grad=True), wires=0)
+        qml.RX(0.432, wires=0)
+        qml.CNOT(wires=[0, 1])
+        qml.expval(qml.PauliX(1))
+
+    with QuantumTape() as circuit2:
+        qml.Hadamard(wires=0)
+        qml.RX(0.123, wires=0)
+        qml.CNOT(wires=[0, 1])
+        qml.sample(qml.PauliZ(3))
+
+    expected_1 = (
+        Circuit()
+        .h(0)
+        .unitary([0], 1 / np.sqrt(2) * np.array([[1, 1], [1, -1]]))
+        .rx(0, FreeParameter("p_1"))
+        .cnot(0, 1)
+        .i(2)
+        .i(3)
+        .expectation(observable=Observable.X(), target=1)
+    )
+
+    expected_2 = (
+        Circuit()
+        .h(0)
+        .rx(0, FreeParameter("p_0"))
+        .cnot(0, 1)
+        .i(2)
+        .i(3)
+        .sample(observable=Observable.Z(), target=3)
+    )
+
+    circuits = [circuit1, circuit2]
+    dev.batch_execute(circuits)
+    mock_run_batch.assert_called_with(
+        [expected_1, expected_2],
+        s3_destination_folder=("foo", "bar"),
+        shots=SHOTS,
+        max_parallel=None,
+        max_connections=AwsQuantumTaskBatch.MAX_CONNECTIONS_DEFAULT,
+        poll_timeout_seconds=AwsQuantumTask.DEFAULT_RESULTS_POLL_TIMEOUT,
+        poll_interval_seconds=AwsQuantumTask.DEFAULT_RESULTS_POLL_INTERVAL,
+        inputs=[{"p_1": 0.432}, {"p_0": 0.123}],
+        foo="bar",
+    )
+
+
 @patch.object(AwsDevice, "run")
-def test_execute_all_samples(mock_run, old_return_type):
+def test_execute_all_samples(mock_run):
     result = GateModelQuantumTaskResult.from_string(
         json.dumps(
             {
@@ -1217,19 +1088,15 @@ def test_execute_all_samples(mock_run, old_return_type):
         qml.sample(qml.Hadamard(0) @ qml.Identity(1))
         qml.sample(qml.Hermitian(np.array([[0, 1], [1, 0]]), wires=[2]))
 
-    if old_return_type:
-        qml.disable_return()
     results = dev.execute(circuit)
-    qml.enable_return()
 
     assert len(results) == 2
     assert results[0].shape == (4,)
     assert results[1].shape == (4,)
 
 
-@pytest.mark.parametrize("old_return_type", [True, False])
 @patch.object(AwsDevice, "run")
-def test_execute_some_samples(mock_run, old_return_type):
+def test_execute_some_samples(mock_run):
     """Tests that a combination with sample returns correctly and does not put single-number
     results in superflous arrays"""
     result = GateModelQuantumTaskResult.from_string(
@@ -1272,8 +1139,6 @@ def test_execute_some_samples(mock_run, old_return_type):
             }
         )
     )
-    if old_return_type:
-        qml.disable_return()
     task = Mock()
     task.result.return_value = result
     mock_run.return_value = task
@@ -1286,7 +1151,6 @@ def test_execute_some_samples(mock_run, old_return_type):
         qml.expval(qml.PauliZ(2))
 
     results = dev.execute(circuit)
-    qml.enable_return()
 
     assert len(results) == 2
     assert results[0].shape == (4,)
@@ -1495,7 +1359,6 @@ def test_add_braket_user_agent_invoked(aws_device_mock):
 
 
 @patch.object(AwsDevice, "run")
-@pytest.mark.parametrize("old_return_type", [True, False])
 @pytest.mark.parametrize(
     "pl_circ, expected_braket_circ, wires, expected_inputs, result_types, expected_pl_result",
     [
@@ -1580,10 +1443,7 @@ def test_execute_and_gradients(
     expected_inputs,
     result_types,
     expected_pl_result,
-    old_return_type,
 ):
-    if old_return_type:
-        qml.disable_return()
     task = Mock()
     type(task).id = PropertyMock(return_value="task_arn")
     task.state.return_value = "COMPLETED"
@@ -1598,7 +1458,6 @@ def test_execute_and_gradients(
     )
 
     results, jacs = dev.execute_and_gradients([pl_circ])
-    qml.enable_return()
 
     assert dev.task == task
     mock_run.assert_called_with(
@@ -1727,7 +1586,7 @@ class DummyLocalQubitDevice(BraketQubitDevice):
 class DummyCircuitSimulator(BraketSimulator):
     def run(
         self, program: ir.openqasm.Program, qubits: int, shots: Optional[int], *args, **kwargs
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         self._shots = shots
         self._qubits = qubits
         return GATE_MODEL_RESULT
@@ -1789,7 +1648,7 @@ class DummyCircuitSimulator(BraketSimulator):
         return GateModelSimulatorDeviceCapabilities.parse_obj(input_json)
 
 
-@patch.object(AwsDevice, "__init__", _set_name)
+@patch.object(AwsDevice, "__init__", _aws_device_mock_init)
 @patch.object(AwsDevice, "aws_session", new_callable=mock.PropertyMock)
 @patch.object(AwsDevice, "type", new_callable=mock.PropertyMock)
 @patch.object(AwsDevice, "properties")
@@ -1803,6 +1662,7 @@ def _aws_device(
     device_arn="baz",
     action_properties=ACTION_PROPERTIES,
     native_gate_set=None,
+    parametrize_differentiable=False,
     **kwargs,
 ):
     properties_mock.action = {DeviceActionType.OPENQASM: action_properties}
@@ -1821,14 +1681,13 @@ def _aws_device(
         device_arn=device_arn,
         aws_session=aws_session_mock,
         shots=shots,
+        parametrize_differentiable=parametrize_differentiable,
         **kwargs,
     )
-    # needed by the BraketAwsQubitDevice.capabilities function
-    dev._device._arn = device_arn
     return dev
 
 
-@patch.object(AwsDevice, "__init__", _set_name)
+@patch.object(AwsDevice, "__init__", _aws_device_mock_init)
 @patch.object(AwsDevice, "aws_session", new_callable=mock.PropertyMock)
 @patch.object(AwsDevice, "properties")
 def _bad_aws_device(properties_mock, session_mock, wires, **kwargs):
@@ -1941,19 +1800,9 @@ def test_invalide_aws_device_for_noise_model(name_mock, device_name, noise_model
         _aws_device(wires=2, device_type=AwsDeviceType.SIMULATOR, noise_model=noise_model)
 
 
-@patch.object(AwsDevice, "run")
-@patch.object(AwsDevice, "name", new_callable=mock.PropertyMock)
-def test_execute_with_noise_model(mock_name, mock_run, noise_model):
-    mock_run.return_value = TASK
-    mock_name.return_value = "dm1"
-    dev = _aws_device(
-        wires=4,
-        device_type=AwsDeviceType.SIMULATOR,
-        noise_model=noise_model,
-        action_properties=ACTION_PROPERTIES_DM_DEVICE,
-    )
-
-    with QuantumTape() as circuit:
+@pytest.fixture
+def pennylane_quantum_tape():
+    with QuantumTape() as tape:
         qml.Hadamard(wires=0)
         qml.QubitUnitary(1 / np.sqrt(2) * np.array([[1, 1], [1, -1]]), wires=0)
         qml.RX(0.432, wires=0)
@@ -1962,13 +1811,12 @@ def test_execute_with_noise_model(mock_name, mock_run, noise_model):
         qml.expval(qml.PauliX(1))
         qml.var(qml.PauliY(2))
         qml.sample(qml.PauliZ(3))
-    circuit.trainable_params = []
+    return tape
 
-    _ = dev.execute(circuit)
 
-    assert dev.task == TASK
-
-    EXPECTED_CIRC = (
+@pytest.fixture
+def expected_braket_circuit_with_noise():
+    return (
         Circuit()
         .h(0)
         .bit_flip(0, 0.05)
@@ -1983,13 +1831,289 @@ def test_execute_with_noise_model(mock_name, mock_run, noise_model):
         .variance(observable=Observable.Y(), target=2)
         .sample(observable=Observable.Z(), target=3)
     )
+
+
+@patch.object(AwsDevice, "run")
+@patch.object(AwsDevice, "name", new_callable=mock.PropertyMock)
+def test_execute_with_noise_model(
+    mock_name, mock_run, noise_model, pennylane_quantum_tape, expected_braket_circuit_with_noise
+):
+    mock_run.return_value = TASK
+    mock_name.return_value = "dm1"
+    dev = _aws_device(
+        wires=4,
+        device_type=AwsDeviceType.SIMULATOR,
+        noise_model=noise_model,
+        action_properties=ACTION_PROPERTIES_DM_DEVICE,
+    )
+    _ = dev.execute(pennylane_quantum_tape)
+
+    assert dev.task == TASK
+
     mock_run.assert_called_with(
-        EXPECTED_CIRC,
+        expected_braket_circuit_with_noise,
         s3_destination_folder=("foo", "bar"),
         shots=SHOTS,
         poll_timeout_seconds=AwsQuantumTask.DEFAULT_RESULTS_POLL_TIMEOUT,
         poll_interval_seconds=AwsQuantumTask.DEFAULT_RESULTS_POLL_INTERVAL,
         inputs={},
+    )
+
+
+class TestPulseFunctionality:
+    """Test the functions specific to supporting pulse programming via Pennylane"""
+
+    @pytest.mark.parametrize(
+        "frameId, expected_result", [("q0_second_state", False), ("q0_drive", True)]
+    )
+    def test_single_frame_filter_oqc_lucy(self, frameId, expected_result):
+        """Test that _is_single_qubit_01_frame successfuly identifies whether a string matches
+        the pattern for a 01 drive frame"""
+        dev = _aws_device(wires=2, device_arn="arn:aws:braket:eu-west-2::device/qpu/oqc/Lucy")
+        assert dev._is_single_qubit_01_frame(frameId) == expected_result
+
+    @pytest.mark.parametrize(
+        "frameId, expected_result", [("q0_second_state", True), ("q0_drive", False)]
+    )
+    def test_single_frame_filter_oqc_lucy_12(self, frameId, expected_result):
+        """Test that _is_single_qubit_12_frame successfuly identifies whether a string matches
+        the pattern for a 12 drive frame"""
+        dev = _aws_device(wires=2, device_arn="arn:aws:braket:eu-west-2::device/qpu/oqc/Lucy")
+        assert dev._is_single_qubit_12_frame(frameId) == expected_result
+
+    def test_frame_filters_raise_error_if_not_oqc_lucy(self):
+        """Test that the functions used to access the pulse frames raise a clear error for devices
+        where frame access is not available through the plugin"""
+        dev = _aws_device(wires=2, device_arn="baz")
+
+        with pytest.raises(
+            NotImplementedError,
+            match="Single-qubit drive frame for pulse control not defined for device",
+        ):
+            dev._is_single_qubit_01_frame("q0_drive")
+
+        with pytest.raises(
+            NotImplementedError,
+            match="Second excitation drive frame for pulse control not defined for device",
+        ):
+            dev._is_single_qubit_12_frame("q0_second_state")
+
+        with pytest.raises(NotImplementedError, match=""):
+            dev._get_frames(filter=None, wires=[0, 1, 2])
+
+    def test_get_frames(self):
+        """Test that the dev._get_frames method returns the expected results"""
+        dev = _aws_device(wires=2, device_arn="arn:aws:braket:eu-west-2::device/qpu/oqc/Lucy")
+
+        class DummyProperties:
+            def __init__(self):
+                self.pulse = PulseDeviceActionProperties.parse_raw(OQC_PULSE_PROPERTIES_ALL_FRAMES)
+
+        dev._device._properties = DummyProperties()
+
+        frames_01 = dev._get_frames(filter=dev._is_single_qubit_01_frame, wires=[0, 1, 2])
+        frames_12 = dev._get_frames(filter=dev._is_single_qubit_12_frame, wires=[0, 1, 2])
+
+        assert len(frames_01) == len(frames_12) == 3
+        assert list(frames_01.keys()) == [0, 1, 2]
+        assert list(frames_12.keys()) == [0, 1, 2]
+
+    def test_settings_for_unsupported_device_raises_error(self):
+        """Test that accessing dev.pulse_settings for a device where this is not defined
+        raises an error"""
+        dev = _aws_device(wires=2, device_arn="baz")
+
+        with pytest.raises(
+            NotImplementedError,
+            match="The pulse_settings property for pulse control is not defined for",
+        ):
+            dev.pulse_settings
+
+    def test_settings(self):
+        """Test that the pulse_settings property retrieves the relevant data from the device
+        pulse and paradigm properties"""
+        dev = _aws_device(wires=2, device_arn="arn:aws:braket:eu-west-2::device/qpu/oqc/Lucy")
+
+        class DummyProperties:
+            def __init__(self):
+                self.pulse = PulseDeviceActionProperties.parse_raw(OQC_PULSE_PROPERTIES_ALL_FRAMES)
+                self.paradigm = GateModelQpuParadigmProperties.parse_raw(OQC_PARADIGM_PROPERTIES)
+
+        dev._device._properties = DummyProperties()
+
+        settings = dev.pulse_settings
+        assert settings["connections"] == [
+            (0, 1),
+            (0, 7),
+            (1, 2),
+            (2, 3),
+            (4, 3),
+            (4, 5),
+            (6, 5),
+            (7, 6),
+        ]
+        assert settings["wires"] == [0, 1, 2, 3, 4, 5, 6, 7]
+        assert np.allclose(settings["qubit_freq"], 4.6)
+        assert np.allclose(settings["anharmonicity"], 0.1)
+
+
+def get_oqc_device():
+    dev = _aws_device(wires=2, device_arn="arn:aws:braket:eu-west-2::device/qpu/oqc/Lucy")
+
+    class DummyProperties:
+        def __init__(self):
+            self.pulse = PulseDeviceActionProperties.parse_raw(OQC_PULSE_PROPERTIES_ALL_FRAMES)
+            self.paradigm = GateModelQpuParadigmProperties.parse_raw(OQC_PARADIGM_PROPERTIES)
+
+    dev._device._properties = DummyProperties()
+
+    return dev
+
+
+class TestPulseValidation:
+    def test_that_check_validity_calls_pulse_validation_function(self, mocker):
+        """Test that check_validity calls _validate_pulse_parameters if the
+        queue contains a ParametrizedEvolution"""
+
+        dev = get_oqc_device()
+
+        spy = mocker.spy(dev, "_validate_pulse_parameters")
+
+        H = qml.pulse.transmon_drive(0.2, 0, 4.3, wires=[0])
+        op = ParametrizedEvolution(H, [], t=10)
+
+        # one call
+        dev.check_validity([op], [])
+        spy.assert_called_once_with(op)
+
+    def test_callable_phase_raises_error(self):
+        """Test that a callable phase (other than qml.pulse.constant) raises an error"""
+        dev = get_oqc_device()
+
+        def f1(p, t):
+            return p * t
+
+        H = qml.pulse.transmon_drive(0.2, f1, 4.3, wires=[0])
+        op = ParametrizedEvolution(H, [3], t=10)
+
+        with pytest.raises(RuntimeError, match="Expected all phases to be constants"):
+            dev._validate_pulse_parameters(op)
+
+    def test_callable_frequency_raises_error(self):
+        """Test that a callable frequency (other than qml.pulse.constant) raises an error"""
+
+        dev = get_oqc_device()
+
+        def f1(p, t):
+            return p * t
+
+        H = qml.pulse.transmon_drive(0.2, 0, f1, wires=[0])
+        op = ParametrizedEvolution(H, [3], t=10)
+
+        with pytest.raises(RuntimeError, match="Expected all frequencies to be constants"):
+            dev._check_pulse_frequency_validity(op)
+
+    def test_constant_callable_phase_passes_validation(self):
+        """Test that the qml.pulse.constant function is an acceptable value for phase,
+        i.e. that no error is raised in validation"""
+
+        dev = get_oqc_device()
+
+        def f1(p, t):
+            return p[0] * t + p[1]
+
+        H = qml.pulse.transmon_drive(f1, qml.pulse.constant, 4.3, wires=[0])
+        op = ParametrizedEvolution(H, [[1.2, 2.2], 3], t=10)
+
+        dev._validate_pulse_parameters(op)
+
+    def test_constant_callable_frequency_passes_validation(self):
+        """Test that the qml.pulse.constant function is an acceptable value for frequency,
+        i.e. no error is raised in validation"""
+
+        dev = get_oqc_device()
+
+        def f1(p, t):
+            return p[0] * t + p[1]
+
+        H = qml.pulse.transmon_drive(f1, 0, qml.pulse.constant, wires=[0])
+        op = ParametrizedEvolution(H, [[0, 1], 4.5], t=10)
+
+        dev._check_pulse_frequency_validity(op)
+        dev._validate_pulse_parameters(op)
+
+    def test_frequecy_out_of_range_raises_error(self):
+        """Test that a frequency outside the acceptable frequency range of the channel
+        raises an error when the frequency is defined as a number"""
+
+        dev = get_oqc_device()
+
+        H = qml.pulse.transmon_drive(0.2, 0, 9, wires=[0])
+        op = ParametrizedEvolution(H, [], t=10)
+
+        with pytest.raises(RuntimeError, match="Frequency range for wire"):
+            dev._validate_pulse_parameters(op)
+
+        with pytest.raises(RuntimeError, match="Frequency range for wire"):
+            dev._check_pulse_frequency_validity(op)
+
+    def test_constant_callable_frequency_out_of_range_raises_error(self):
+        """Test that a frequency outside the acceptable frequency range of the channel
+        raises an error when the frequency is defined via qml.pulse.constant and a passed
+        parameter"""
+        dev = get_oqc_device()
+
+        H = qml.pulse.transmon_drive(0.2, 0, qml.pulse.constant, wires=[0])
+        op = ParametrizedEvolution(H, [2.5], t=10)
+
+        with pytest.raises(RuntimeError, match="Frequency range for wire"):
+            dev._check_pulse_frequency_validity(op)
+
+    def test_multiple_simultaneous_pulses_on_a_wire_raises_error(self):
+        """Test that a ParameterizedEvolution operator that tries to put multiple
+        pulses on a single qubit simultaneously raises an error"""
+        dev = get_oqc_device()
+
+        H = qml.pulse.transmon_drive(0.2, 0, 4.3, wires=[0])
+        H += qml.pulse.transmon_drive(0.5, 0, 4.1, wires=[0])
+        op = ParametrizedEvolution(H, [3], t=10)
+
+        with pytest.raises(RuntimeError, match="Multiple waveforms assigned to wire"):
+            dev._validate_pulse_parameters(op)
+
+
+@patch.object(AwsDevice, "run_batch")
+@patch.object(AwsDevice, "name", new_callable=mock.PropertyMock)
+@patch.object(BraketAwsQubitDevice, "_braket_to_pl_result")
+def test_batch_execute_with_noise_model(
+    mock_to_result,
+    mock_name,
+    mock_run_batch,
+    noise_model,
+    pennylane_quantum_tape,
+    expected_braket_circuit_with_noise,
+):
+    NUM_CIRCUITS = 5
+    mock_name.return_value = "dm1"
+    dev = _aws_device(
+        wires=4,
+        device_type=AwsDeviceType.SIMULATOR,
+        noise_model=noise_model,
+        action_properties=ACTION_PROPERTIES_DM_DEVICE,
+        parallel=True,
+    )
+
+    _ = dev.batch_execute([pennylane_quantum_tape] * NUM_CIRCUITS)
+
+    mock_run_batch.assert_called_with(
+        [expected_braket_circuit_with_noise] * NUM_CIRCUITS,
+        s3_destination_folder=("foo", "bar"),
+        shots=SHOTS,
+        poll_timeout_seconds=AwsQuantumTask.DEFAULT_RESULTS_POLL_TIMEOUT,
+        poll_interval_seconds=AwsQuantumTask.DEFAULT_RESULTS_POLL_INTERVAL,
+        max_connections=100,
+        max_parallel=None,
+        inputs=[],
     )
 
 

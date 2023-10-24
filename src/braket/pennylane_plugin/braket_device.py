@@ -35,10 +35,11 @@ Code details
 
 import collections
 import numbers
+from collections.abc import Iterable, Sequence
 
 # pylint: disable=invalid-name
 from enum import Enum, auto
-from typing import Dict, FrozenSet, Iterable, List, Optional, Sequence, Union
+from typing import Optional, Union
 
 import numpy as onp
 import pennylane as qml
@@ -49,7 +50,7 @@ from braket.device_schema import DeviceActionType
 from braket.devices import Device, LocalSimulator
 from braket.simulator import BraketSimulator
 from braket.tasks import GateModelQuantumTaskResult, QuantumTask
-from pennylane import QuantumFunctionError, QubitDevice, active_return
+from pennylane import QuantumFunctionError, QubitDevice
 from pennylane import numpy as np
 from pennylane.gradients import param_shift
 from pennylane.measurements import (
@@ -101,10 +102,13 @@ class BraketQubitDevice(QubitDevice):
             execution.
         verbatim (bool): Whether to run tasks in verbatim mode. Note that verbatim mode only
             supports the native gate set of the device. Default False.
+        parametrize_differentiable (bool): Whether to bind differentiable parameters (parameters
+            marked with ``required_grad=True``) on the Braket device rather than in PennyLane.
+            Default: True.
         `**run_kwargs`: Variable length keyword arguments for ``braket.devices.Device.run()``.
     """
     name = "Braket PennyLane plugin"
-    pennylane_requires = ">=0.18.0"
+    pennylane_requires = ">=0.30.0"
     version = __version__
     author = "Amazon Web Services"
 
@@ -116,6 +120,7 @@ class BraketQubitDevice(QubitDevice):
         shots: Union[int, None],
         noise_model: Optional[NoiseModel] = None,
         verbatim: bool = False,
+        parametrize_differentiable: bool = True,
         **run_kwargs,
     ):
         if DeviceActionType.OPENQASM not in device.properties.action:
@@ -133,6 +138,7 @@ class BraketQubitDevice(QubitDevice):
         self._circuit = None
         self._task = None
         self._noise_model = noise_model
+        self._parametrize_differentiable = parametrize_differentiable
         self._run_kwargs = run_kwargs
         self._supported_ops = supported_operations(self._device, verbatim=verbatim)
         self._check_supported_result_types()
@@ -147,12 +153,12 @@ class BraketQubitDevice(QubitDevice):
         self._task = None
 
     @property
-    def operations(self) -> FrozenSet[str]:
-        """FrozenSet[str]: The set of names of PennyLane operations that the device supports."""
+    def operations(self) -> frozenset[str]:
+        """frozenset[str]: The set of names of PennyLane operations that the device supports."""
         return self._supported_ops
 
     @property
-    def observables(self) -> FrozenSet[str]:
+    def observables(self) -> frozenset[str]:
         base_observables = frozenset(super().observables)
         # This needs to be here bc expectation(ax+by)== a*expectation(x)+b*expectation(y)
         # is only true when shots=0
@@ -174,7 +180,7 @@ class BraketQubitDevice(QubitDevice):
         self,
         circuit: QuantumTape,
         compute_gradient: bool = False,
-        trainable_indices: FrozenSet[int] = None,
+        trainable_indices: frozenset[int] = None,
         **run_kwargs,
     ):
         """Converts a PennyLane circuit to a Braket circuit"""
@@ -198,6 +204,7 @@ class BraketQubitDevice(QubitDevice):
                         braket_circuit.add_result_type(result_type)
                 else:
                     braket_circuit.add_result_type(translated)
+
         return braket_circuit
 
     def _apply_gradient_result_type(self, circuit, braket_circuit):
@@ -231,18 +238,18 @@ class BraketQubitDevice(QubitDevice):
 
     def statistics(
         self, braket_result: GateModelQuantumTaskResult, observables: Sequence[Observable]
-    ) -> List[float]:
+    ) -> list[float]:
         """Processes measurement results from a Braket task result and returns statistics.
 
         Args:
             braket_result (GateModelQuantumTaskResult): the Braket task result
-            observables (List[Observable]): the observables to be measured
+            observables (list[Observable]): the observables to be measured
 
         Raises:
             QuantumFunctionError: if the value of :attr:`~.Observable.return_type` is not supported
 
         Returns:
-            List[float]: the corresponding statistics
+            list[float]: the corresponding statistics
         """
         results = []
         for obs in observables:
@@ -279,23 +286,14 @@ class BraketQubitDevice(QubitDevice):
                 else result
                 for result in results
             ]
-            return results_list[0] if active_return() else np.asarray(results_list)
+            return results_list[0]
 
-        if active_return():
-            # Assuming that the braket device doesn't have native parameter broadcasting
-            # Assuming that the braket device doesn't support shot vectors.
-            # Otherwise, we may need additional nesting
-            if len(circuit.measurements) == 1:
-                return onp.array(results).squeeze()
-            return tuple(onp.array(result).squeeze() for result in results)
-
-        # Ensures that a combination with sample does not put
-        # single-number results in superfluous arrays
-        all_sampled = all(obs.return_type is Sample for obs in circuit.observables)
-        if circuit.is_sampled and not all_sampled:
-            return np.asarray(results, dtype="object")
-
-        return np.asarray(results)
+        # Assuming that the braket device doesn't have native parameter broadcasting
+        # Assuming that the braket device doesn't support shot vectors.
+        # Otherwise, we may need additional nesting
+        if len(circuit.measurements) == 1:
+            return onp.array(results).squeeze()
+        return tuple(onp.array(result).squeeze() for result in results)
 
     @staticmethod
     def _tracking_data(task):
@@ -360,15 +358,17 @@ class BraketQubitDevice(QubitDevice):
 
     def execute(self, circuit: QuantumTape, compute_gradient=False, **run_kwargs) -> np.ndarray:
         self.check_validity(circuit.operations, circuit.observables)
-        trainable = BraketQubitDevice._get_trainable_parameters(circuit) if compute_gradient else {}
+        trainable = (
+            BraketQubitDevice._get_trainable_parameters(circuit)
+            if compute_gradient or self._parametrize_differentiable
+            else {}
+        )
         self._circuit = self._pl_to_braket_circuit(
             circuit,
             compute_gradient=compute_gradient,
             trainable_indices=frozenset(trainable.keys()),
             **run_kwargs,
         )
-        if self._noise_model:
-            self._circuit = self._noise_model.apply(self._circuit)
         if not isinstance(circuit.observables[0], MeasurementTransform):
             self._task = self._run_task(
                 self._circuit, inputs={f"p_{k}": v for k, v in trainable.items()}
@@ -400,7 +400,7 @@ class BraketQubitDevice(QubitDevice):
         rotations: Sequence[Operation] = None,
         use_unique_params: bool = False,
         *,
-        trainable_indices: Optional[FrozenSet[int]] = None,
+        trainable_indices: Optional[frozenset[int]] = None,
         **run_kwargs,
     ) -> Circuit:
         """Instantiate Braket Circuit object."""
@@ -413,17 +413,22 @@ class BraketQubitDevice(QubitDevice):
         for operation in operations + rotations:
             param_names = []
             for _ in operation.parameters:
-                if param_index in trainable_indices or use_unique_params:
+                if not isinstance(operation, qml.operation.Channel) and (
+                    param_index in trainable_indices or use_unique_params
+                ):
                     param_names.append(f"p_{param_index}")
                 else:
                     param_names.append(None)
                 param_index += 1
+
+            dev_wires = self.map_wires(operation.wires).tolist()
             gate = translate_operation(
                 operation,
                 use_unique_params=bool(trainable_indices) or use_unique_params,
                 param_names=param_names,
+                device=self._device,
             )
-            dev_wires = self.map_wires(operation.wires).tolist()
+
             ins = Instruction(gate, dev_wires)
             circuit.add_instruction(ins)
 
@@ -432,6 +437,9 @@ class BraketQubitDevice(QubitDevice):
         # To ensure the results have the right number of qubits
         for qubit in sorted(unused):
             circuit.i(qubit)
+
+        if self._noise_model:
+            circuit = self._noise_model.apply(circuit)
 
         return circuit
 
@@ -469,7 +477,7 @@ class BraketQubitDevice(QubitDevice):
         return translate_result(braket_result, observable, dev_wires, self._braket_result_types)
 
     @staticmethod
-    def _get_trainable_parameters(tape: QuantumTape) -> Dict[int, numbers.Number]:
+    def _get_trainable_parameters(tape: QuantumTape) -> dict[int, numbers.Number]:
         trainable_indices = sorted(tape.trainable_params)
         params = tape.get_parameters()
         trainable = {}
@@ -588,9 +596,22 @@ class BraketAwsQubitDevice(BraketQubitDevice):
 
         for circuit in circuits:
             self.check_validity(circuit.operations, circuit.observables)
-        braket_circuits = [
-            self._pl_to_braket_circuit(circuit, **run_kwargs) for circuit in circuits
-        ]
+        all_trainable = []
+        braket_circuits = []
+        for circuit in circuits:
+            trainable = (
+                BraketQubitDevice._get_trainable_parameters(circuit)
+                if self._parametrize_differentiable
+                else {}
+            )
+            all_trainable.append(trainable)
+            braket_circuits.append(
+                self._pl_to_braket_circuit(
+                    circuit,
+                    trainable_indices=frozenset(trainable.keys()),
+                    **run_kwargs,
+                )
+            )
 
         batch_shots = 0 if self.analytic else self.shots
 
@@ -602,6 +623,9 @@ class BraketAwsQubitDevice(BraketQubitDevice):
             max_connections=self._max_connections,
             poll_timeout_seconds=self._poll_timeout_seconds,
             poll_interval_seconds=self._poll_interval_seconds,
+            inputs=[{f"p_{k}": v for k, v in trainable.items()} for trainable in all_trainable]
+            if self._parametrize_differentiable
+            else [],
             **self._run_kwargs,
         )
         # Call results() to retrieve the Braket results in parallel.
@@ -687,6 +711,107 @@ class BraketAwsQubitDevice(BraketQubitDevice):
 
         return outcomes
 
+    def _check_pulse_frequency_validity(self, ev):
+        """Confirm that, for each waveform on the ParametrizedEvolution operator, the frequency
+        setting is a constant, and the value is within the frequency range for the relevant frame;
+        if not, raise an error"""
+
+        # confirm all frequency values are constant (or the qml.pulse.constant function)
+        callable_freqs = [
+            pulse.frequency
+            for pulse in ev.H.pulses
+            if (callable(pulse.frequency) and pulse.frequency != qml.pulse.constant)
+        ]
+
+        if callable_freqs:
+            raise RuntimeError(
+                "Expected all frequencies to be constants or qml.pulse.constant, "
+                "but received callable(s)"
+            )
+
+        # confirm all frequencies are within permitted difference from center frequency
+        param_idx = 0
+        for pulse in ev.H.pulses:
+            freq = pulse.frequency
+            # track the index for parameters in case we need to evaluate qml.pulse.constant
+            if callable(pulse.amplitude):
+                param_idx += 1
+            if callable(pulse.phase):
+                param_idx += 1
+            if callable(pulse.frequency):
+                # if frequency is callable, its qml.pulse.constant and equal to its parameter
+                freq = ev.parameters[param_idx]
+                param_idx += 1
+
+            wires = self.map_wires(pulse.wires).tolist()
+            freq_min = 3  # GHz
+            freq_max = 8
+
+            if not (freq_min < freq < freq_max):
+                raise RuntimeError(
+                    f"Frequency range for wire(s) {wires} is between {freq_min} "
+                    f"and {freq_max} GHz, but received {freq} GHz."
+                )
+
+    def _validate_pulse_parameters(self, ev):
+        """Validates pulse input (ParametrizedEvolution) before converting to a PulseGate"""
+
+        # note: the pulse upload on the AWS service checks at task creation that the max amplitude
+        # is not exceeded, so that check has not been included here
+
+        # confirm frequencies are constant and within the permitted frequency range for the channel
+        self._check_pulse_frequency_validity(ev)
+
+        # confirm all phase values are constant (or the qml.pulse.constant function)
+        callable_phase = [
+            pulse.phase
+            for pulse in ev.H.pulses
+            if (callable(pulse.phase) and pulse.phase != qml.pulse.constant)
+        ]
+
+        if callable_phase:
+            raise RuntimeError(
+                "Expected all phases to be constants or qml.pulse.constant, "
+                "but received callable(s)"
+            )
+
+        # ensure each ParametrizedEvolution/PulseGate contains at most one waveform per frame/wire
+        wires_used = []
+        for pulse in ev.H.pulses:
+            for wire in pulse.wires:
+                if wire in wires_used:
+                    raise RuntimeError(
+                        f"Multiple waveforms assigned to wire {wire} in the same "
+                        f"ParametrizedEvolution gate"
+                    )
+                wires_used.append(wire)
+
+    def check_validity(self, queue, observables):
+        """Check validity of pulse operations before running the standard check_validity function
+
+        Checks whether the operations and observables in queue are all supported by the device. Runs
+        the standard check_validity function for a PennyLane device, and an additional check to
+        validate any pulse-operations in the form of a ParametrizedEvolution operation.
+
+        Args:
+            queue (Iterable[~.operation.Operation]): quantum operation objects which are intended
+                to be applied on the device
+            observables (Iterable[~.operation.Observable]): observables which are intended
+                to be evaluated on the device
+
+        Raises:
+            DeviceError: if there are operations in the queue or observables that the device does
+                not support
+            RuntimeError: if there are ParametrizedEvolution operations in the queue that are not
+                supported because of invalid pulse parameters
+        """
+
+        super().check_validity(queue, observables)
+
+        for op in queue:
+            if isinstance(op, qml.pulse.ParametrizedEvolution):
+                self._validate_pulse_parameters(op)
+
     def capabilities(self=None):
         """Add support for AG on sv1"""
         # normally, we'd just call super().capabilities() here, but super()
@@ -709,7 +834,6 @@ class BraketAwsQubitDevice(BraketQubitDevice):
         """
         res = []
         jacs = []
-        active_jac = False
         for circuit in circuits:
             observables = circuit.observables
             if not circuit.trainable_params:
@@ -725,16 +849,117 @@ class BraketAwsQubitDevice(BraketQubitDevice):
                 new_res = self.execute(circuit, compute_gradient=False)
             else:
                 results = self.execute(circuit, compute_gradient=True)
-                if active_return():
-                    active_jac = True
-                    new_res, new_jac = results
-                    new_jac = self._adjoint_jacobian_processing(new_jac)
-                else:
-                    new_res, new_jac = results[0]
+                new_res, new_jac = results
+                # PennyLane expects the forward execution result to be a scalar
+                # when it is accompanied by an adjoint gradient calculation
+                new_res = new_res[0]
+                new_jac = self._adjoint_jacobian_processing(new_jac)
             res.append(new_res)
             jacs.append(new_jac)
-        res = res[0] if len(res) == 1 and active_jac else res
         return res, jacs
+
+    def _is_single_qubit_01_frame(self, f_string, wire=None):
+        """Defines the condition for selecting frames addressing the qubit (01)
+        drive based on frame name"""
+        if self._device.arn == "arn:aws:braket:eu-west-2::device/qpu/oqc/Lucy":
+            if wire is not None:
+                return f_string == f"q{wire}_drive"
+            return "drive" in f_string
+        else:
+            raise NotImplementedError(
+                f"Single-qubit drive frame for pulse control not defined for "
+                f"device {self._device.arn}"
+            )
+
+    def _is_single_qubit_12_frame(self, f_string, wire=None):
+        """Defines the condition for selecting frames addressing excitation to
+        the second excited state based on frame name"""
+        if self._device.arn == "arn:aws:braket:eu-west-2::device/qpu/oqc/Lucy":
+            if wire is not None:
+                return f_string == f"q{wire}_second_state"
+            return "second_state" in f_string
+        else:
+            raise NotImplementedError(
+                f"Second excitation drive frame for pulse control not defined for "
+                f"device {self._device.arn}"
+            )
+
+    def _get_frames(self, filter, wires):
+        """Takes a filter defining how the relevant frames are labelled, and returns all the frames
+        that fit, i.e.:
+
+        cond = lambda frame_id, wire: f"q{wire}_drive" == frame_id
+        frames = self._get_frames(cond, wires=[0, 1, 2])
+
+        would return all the frames with ids "q0_drive" "q1_drive", and "q2_drive", stored
+        in a dictionary with keys [0, 1, 2] identifying the qubit number.
+        """
+        if not self._device.arn == "arn:aws:braket:eu-west-2::device/qpu/oqc/Lucy":
+            raise NotImplementedError(
+                f"Accessing drive frame for pulse control is not defined for "
+                f"device {self._device.arn}"
+            )
+
+        frames = {}
+        for wire in wires:
+            for frame, info in self._device.properties.pulse.dict()["frames"].items():
+                if filter(frame, wire):
+                    frames[wire] = info
+
+        return frames
+
+    @property
+    def pulse_settings(self):
+        """Dictionary of constants set by the hardware (qubit resonant frequencies,
+        inter-qubit connection graph, wires and anharmonicities).
+
+        Used to enable initializing hardware-consistent Hamiltonians by returning
+        values that would need to be passed, i.e.:
+
+            >>> dev_remote = qml.device('braket.aws.qubit',
+            >>>                          wires=8,
+            >>>                          arn='arn:aws:braket:eu-west-2::device/qpu/oqc/Lucy')
+            >>> pulse_settings = dev_remote.pulse_settings
+            >>> H_int = qml.pulse.transmon_interaction(**pulse_settings, coupling=0.02)
+
+        By passing the ``pulse_settings`` from the remote device to ``transmon_interaction``, an
+        ``H_int`` Hamiltonian term is created using the constants specific to the hardware.
+        This is relevant for simulating the hardware in PennyLane on the ``default.qubit`` device.
+
+        Note that the user must supply coupling coefficients, as these are not available from the
+        hardware backend.
+        """
+        if not self._device.arn == "arn:aws:braket:eu-west-2::device/qpu/oqc/Lucy":
+            raise NotImplementedError(
+                f"The pulse_settings property for pulse control is not defined for "
+                f"device {self._device.arn}"
+            )
+
+        device_info = self._device.properties.paradigm
+        wires = [i for i in range(device_info.qubitCount)]
+
+        drive_frames_01 = self._get_frames(filter=self._is_single_qubit_01_frame, wires=wires)
+        drive_frames_12 = self._get_frames(filter=self._is_single_qubit_12_frame, wires=wires)
+
+        qubit_freq = [drive_frames_01[wire]["frequency"] * 1e-9 for wire in wires]  # Hz to GHz
+
+        connections = []
+        for q1, connected_qubits in device_info.connectivity.connectivityGraph.items():
+            for q2 in connected_qubits:
+                connection = (int(q1), int(q2))
+                connections.append(connection)
+
+        anharmonicity = [
+            (drive_frames_01[wire]["frequency"] - drive_frames_12[wire]["frequency"]) * 1e-9
+            for wire in wires
+        ]
+
+        return {
+            "qubit_freq": qubit_freq,
+            "connections": connections,
+            "wires": wires,
+            "anharmonicity": anharmonicity,
+        }
 
 
 class BraketLocalQubitDevice(BraketQubitDevice):

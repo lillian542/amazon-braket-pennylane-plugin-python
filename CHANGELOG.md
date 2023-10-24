@@ -1,5 +1,90 @@
 # Changelog
 
+## v1.22.0 (2023-10-21)
+
+### Deprecations and Removals
+
+ * Remove legacy return types system
+
+### Bug Fixes and Other Changes
+
+ * Remove legacy return types system
+
+### Documentation Changes
+
+ * Use builtins for type hints
+
+## v1.21.0 (2023-10-11)
+
+### Features
+
+ * remove python 3.8 support
+
+## v1.20.3.post1 (2023-09-20)
+
+### Documentation Changes
+
+ * Update conf.py
+
+## v1.20.3.post0 (2023-09-14)
+
+### Documentation Changes
+
+ * Replace aws org with amazon-braket in badges
+
+## v1.20.3 (2023-09-13)
+
+### Bug Fixes and Other Changes
+
+ * ops: update codeowner file to amazon-braket/braket-dev
+
+## v1.20.2 (2023-09-12)
+
+### Bug Fixes and Other Changes
+
+ * Extract tf casting method
+
+### Documentation Changes
+
+ * update for amazon-braket org
+
+## v1.20.1 (2023-08-29)
+
+### Bug Fixes and Other Changes
+
+ * build(deps): bump aws-actions/stale-issue-cleanup from 3 to 6
+
+### Documentation Changes
+
+ * Update PL requirement in `BraketQubitDevice`
+
+## v1.20.0 (2023-08-21)
+
+### Features
+
+ * Enable `FreeParameter` creation for trainable parameters
+
+### Bug Fixes and Other Changes
+
+ * Don't create `FreeParameter`s for noise
+
+## v1.19.1 (2023-07-27)
+
+### Bug Fixes and Other Changes
+
+ * docs: update README to recommend using Python 3.8
+
+## v1.19.0 (2023-07-26)
+
+### Features
+
+ * Remove `do_queue` kwarg
+
+### Bug Fixes and Other Changes
+
+ * Replace Universal Analytics tag with GA4 tag in the docs
+ * support noise model in batch_execute
+
 ## v1.18.0 (2023-07-20)
 
 ### Features

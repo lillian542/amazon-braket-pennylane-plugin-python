@@ -235,6 +235,7 @@ html_theme_options = {
     "navbar_name": "PennyLane-Braket",
     "toc_overview": True,
     "navbar_active_link": 3,
+    "google_analytics_tracking_id": "G-C480Z9JL0D",
 }
 
 edit_on_github_project = "aws/amazon-braket-pennylane-plugin-python"
